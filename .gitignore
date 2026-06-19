@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Local Netlify state
+.netlify/
+
+# Environment/secrets
+.env
+.env.*
+!.env.example
+
+# Local/private files
+Planilha_Financeira_Pessoal_Anual.xlsx
+Criar-PlanilhaFinanceira.ps1
+
+# QA artifacts
+qa-screenshots/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db

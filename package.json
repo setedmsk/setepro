@@ -1,0 +1,14 @@
+{
+  "name": "tipster-pro",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "netlify dev",
+    "check": "node -e \"console.log('Static app + Netlify Functions scaffold OK')\""
+  },
+  "dependencies": {
+    "@netlify/blobs": "^10.7.9",
+    "openai": "^4.104.0"
+  }
+}
