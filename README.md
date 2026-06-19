@@ -1,56 +1,49 @@
 # Tipster PRO
 
-Painel web para analisar jogos, ler prints de bilhetes e gerar palpites sob demanda com Netlify Functions.
+Tipster PRO e um painel simples para transformar jogos, prints e odds em uma analise mais organizada.
 
-## O que tem no app
+A ideia do projeto e bem direta: voce informa os jogos ou envia um print da bet, o app cruza com dados de API quando possivel, limpa mercados confusos e entrega bilhetes mais faceis de conferir na casa de aposta.
 
-- Analise manual de jogos digitados.
-- Leitura de prints da casa de aposta com IA.
-- Palpites sob demanda para futebol, basquete, volei e e-sports.
-- Filtros de Brasileirao: Serie A, A+B+C e Serie B/C.
-- Backend em Netlify Functions com chaves protegidas por variaveis de ambiente.
-- Cache por data, botao e mercados para reduzir consumo de API.
+## O que ele faz hoje
 
-## Stack
+- Le prints da tela da bet e tenta organizar jogo, mercado e odd.
+- Analisa jogos digitados manualmente.
+- Busca palpites de futebol apenas quando voce clica, para economizar API.
+- Tem botoes separados para Brasileirao Serie A, Brasileirao A+B+C e Brasileirao Serie B/C.
+- Tambem tem atalhos para basquete, volei e e-sports.
+- Evita mercados ruins ou dificeis, como handicap quebrado, linhas 0.25/0.75 e nomes crus tipo `Away`.
+- Usa cache por data, botao e mercados marcados para nao repetir busca desnecessaria.
 
-- Frontend estatico em `index.html`.
-- Netlify Functions em `netlify/functions`.
-- Netlify Blobs para cache de relatorios/palpites.
-- API-Football/API-Sports para jogos e odds.
-- OpenAI para leitura/análise de prints.
-- OddsPapi para e-sports.
-
-## Estrutura
+## Como o projeto esta montado
 
 ```text
-.
-├── index.html
-├── netlify.toml
-├── package.json
-├── package-lock.json
-├── .env.example
-└── netlify/
-    └── functions/
-        ├── analyze-games.mts
-        ├── analyze-screenshot.mts
-        ├── analyze-ticket.mts
-        ├── daily-picks.mts
-        ├── daily-basketball-picks.mts
-        ├── daily-volleyball-picks.mts
-        ├── daily-esports-picks.mts
-        └── health.mts
+index.html                         Interface principal
+netlify.toml                       Configuracao do Netlify
+package.json                       Dependencias e scripts
+.env.example                       Exemplo das variaveis de ambiente
+netlify/functions/                 Backend do app
+  analyze-games.mts                Analise de jogos digitados
+  analyze-screenshot.mts           Leitura de prints com IA
+  analyze-ticket.mts               Analise de bilhetes informados
+  daily-picks.mts                  Palpites de futebol sob demanda
+  daily-basketball-picks.mts       Palpites de basquete
+  daily-volleyball-picks.mts       Palpites de volei
+  daily-esports-picks.mts          Palpites de e-sports
+  health.mts                       Status do backend
 ```
 
-## Variaveis de ambiente
+## Variaveis que precisam ir no Netlify
 
-Configure no Netlify em **Site configuration > Environment variables**.
+Configure em:
 
-Obrigatorias para o fluxo principal:
+`Site configuration > Environment variables`
+
+Principais:
 
 - `API_FOOTBALL_KEY`
 - `OPENAI_API_KEY` ou `OPENAI_BASE_URL`
 
-Opcionais por esporte/recurso:
+Opcionais:
 
 - `API_BASKETBALL_KEY`
 - `API_VOLLEYBALL_KEY`
@@ -60,33 +53,37 @@ Opcionais por esporte/recurso:
 - `OPENAI_VISION_MODEL`
 - `DAILY_PICKS_AI=1`
 
-Use `.env.example` como referencia. Nunca commite chaves reais.
+Use o arquivo `.env.example` como cola. Chave real nao entra no Git.
 
-## Comandos
+## Rodando local
 
 ```bash
 npm install
-npm run check
-npx netlify build
 npx netlify dev
+```
+
+Para conferir se o build do Netlify passa:
+
+```bash
+npx netlify build
 ```
 
 ## Deploy
 
-O projeto esta preparado para Netlify.
+O projeto foi feito para Netlify:
 
 - Publish directory: `.`
 - Functions directory: `netlify/functions`
-- Config: `netlify.toml`
+- Config file: `netlify.toml`
 
-Para publicar manualmente:
+Deploy manual:
 
 ```bash
 npx netlify deploy
 npx netlify deploy --prod
 ```
 
-## Endpoints
+## Rotas principais
 
 - `GET /api/health`
 - `POST /api/analyze-games`
@@ -97,8 +94,8 @@ npx netlify deploy --prod
 - `GET|POST /api/daily-volleyball-picks`
 - `GET|POST /api/daily-esports-picks`
 
-## Observacoes
+## Notas do projeto
 
-- O app foi ajustado para nao rodar relatorio pesado automaticamente as 07h.
-- Palpites de futebol sao gerados somente sob demanda, quando o usuario clica nos botoes.
-- Arquivos pessoais e artefatos locais ficam fora do Git por `.gitignore`.
+O relatorio pesado das 07h foi removido de proposito. Antes ele gastava muita quota da API logo cedo. Agora os palpites sao sob demanda: so consulta quando alguem clica no botao.
+
+Arquivos locais, planilhas, `.env`, `.netlify` e `node_modules` ficam fora do Git pelo `.gitignore`.
