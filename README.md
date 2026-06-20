@@ -26,6 +26,7 @@ netlify/functions/                 Backend do app
   analyze-screenshot.mts           Leitura de prints com IA
   analyze-ticket.mts               Analise de bilhetes informados
   daily-picks.mts                  Palpites de futebol sob demanda
+  settled-picks.mts                Relatorio de acertos do dia
   daily-basketball-picks.mts       Palpites de basquete
   daily-volleyball-picks.mts       Palpites de volei
   daily-esports-picks.mts          Palpites de e-sports
@@ -90,6 +91,7 @@ npx netlify deploy --prod
 - `POST /api/analyze-screenshot`
 - `POST /api/analyze-ticket`
 - `GET|POST /api/daily-picks`
+- `GET /api/settled-picks`
 - `GET|POST /api/daily-basketball-picks`
 - `GET|POST /api/daily-volleyball-picks`
 - `GET|POST /api/daily-esports-picks`

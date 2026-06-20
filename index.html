@@ -850,6 +850,45 @@
       border: 1px solid rgba(255, 99, 114, 0.28);
     }
 
+    .settlement-pill {
+      display: inline-flex;
+      min-height: 24px;
+      align-items: center;
+      justify-content: center;
+      padding: 0 8px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      font-size: 10px;
+      font-weight: 900;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .settlement-won {
+      border-color: rgba(49, 247, 164, 0.3);
+      background: rgba(49, 247, 164, 0.12);
+      color: #c9ffe4;
+    }
+
+    .settlement-lost {
+      border-color: rgba(255, 99, 114, 0.32);
+      background: rgba(255, 99, 114, 0.12);
+      color: #ffc1c8;
+    }
+
+    .settlement-pending {
+      border-color: rgba(37, 217, 255, 0.32);
+      background: rgba(37, 217, 255, 0.1);
+      color: #cbf7ff;
+    }
+
+    .settlement-review,
+    .settlement-void {
+      border-color: rgba(255, 190, 73, 0.32);
+      background: rgba(255, 190, 73, 0.12);
+      color: #ffe2a8;
+    }
+
     .analysis-table {
       width: 100%;
       border-collapse: collapse;
@@ -1269,6 +1308,15 @@
                   </svg>
                   ⚽ Hoje
                 </button>
+                <button class="btn btn-secondary" type="button" id="settledPicksBtn" title="Relat&oacute;rio dos palpites que bateram ou n&atilde;o bateram no dia">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                    <path d="M4 6h16"></path>
+                    <path d="M4 12h10"></path>
+                    <path d="M4 18h8"></path>
+                    <path d="M16 15l2 2 4-5"></path>
+                  </svg>
+                  <span class="btn-label">Acertos do dia</span>
+                </button>
                 <button class="btn btn-secondary" type="button" id="brSerieABtn" title="Melhores palpites do Brasileir&atilde;o S&eacute;rie A">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
                     <path d="M4 6h16"></path>
@@ -1493,6 +1541,7 @@
     const bestBtn = document.getElementById("bestBtn");
     const liveAnalyzeBtn = document.getElementById("liveAnalyzeBtn");
     const dailyPicksBtn = document.getElementById("dailyPicksBtn");
+    const settledPicksBtn = document.getElementById("settledPicksBtn");
     const brSerieABtn = document.getElementById("brSerieABtn");
     const brMixBtn = document.getElementById("brMixBtn");
     const brSerieBcBtn = document.getElementById("brSerieBcBtn");
@@ -2667,6 +2716,87 @@
       ].join("");
     }
 
+    function settlementStatusClass(status) {
+      if (status === "won") return "settlement-won";
+      if (status === "lost") return "settlement-lost";
+      if (status === "pending") return "settlement-pending";
+      if (status === "void") return "settlement-void";
+      return "settlement-review";
+    }
+
+    function settlementTone(summary) {
+      const won = Number(summary && summary.won || 0);
+      const lost = Number(summary && summary.lost || 0);
+      if (won > lost) return "baixo";
+      if (lost > won) return "alto";
+      return "medio";
+    }
+
+    function renderSettlementRows(items) {
+      if (!Array.isArray(items) || !items.length) {
+        return "<tr><td colspan=\"5\">Nenhum palpite salvo para fechar neste dia.</td></tr>";
+      }
+
+      return items.map((item) => {
+        const market = item.market || item.category || "--";
+        const selection = item.selection || item.pick || item.value || "--";
+        const odd = item.odd ? formatOdd(Number(item.odd)) : "--";
+        const label = item.label || "Conferir";
+        const status = item.status || "review";
+        const source = item.ticketName ? " | " + item.ticketName : "";
+        return [
+          "<tr>",
+          "<td><strong>" + escapeHtml(item.game || "--") + "</strong><br><span class=\"muted\">" + escapeHtml((item.sourceLabel || "Palpite") + source) + "</span></td>",
+          "<td>" + escapeHtml(formatMarketName(market)) + "<br><span class=\"muted\">" + escapeHtml(formatSelectionName(selection, market)) + "</span></td>",
+          "<td>" + escapeHtml(item.result || "--") + "</td>",
+          "<td>" + escapeHtml(odd) + "</td>",
+          "<td><span class=\"settlement-pill " + settlementStatusClass(status) + "\">" + escapeHtml(label) + "</span><br><span class=\"muted\">" + escapeHtml(item.reason || "") + "</span></td>",
+          "</tr>"
+        ].join("");
+      }).join("");
+    }
+
+    function renderSettlementReport(data) {
+      const summary = data.summary || {};
+      const source = data.source || {};
+      const items = Array.isArray(data.items) ? data.items : [];
+      const won = Number(summary.won || 0);
+      const lost = Number(summary.lost || 0);
+      const pending = Number(summary.pending || 0);
+      const review = Number(summary.review || 0);
+      const voided = Number(summary.void || 0);
+      const checked = Number(source.picksChecked || items.length || 0);
+      const tone = settlementTone(summary);
+
+      totalOddEl.textContent = "--";
+      possibleReturnEl.textContent = "--";
+      possibleProfitEl.textContent = "--";
+      selectionCountEl.textContent = String(checked);
+      typeHintEl.textContent = "Relatorio de acertos";
+      oddHintEl.textContent = "Fechamento do dia";
+      riskBadgeEl.textContent = won > lost ? "Bom" : lost > won ? "Atenção" : "Neutro";
+      riskBadgeEl.dataset.risk = tone;
+      riskPinEl.style.left = won > lost ? "18%" : lost > won ? "66%" : "42%";
+
+      outputEl.innerHTML = [
+        "<article class=\"analysis-card\" data-tone=\"" + tone + "\">",
+        "<header><h3>Relat&oacute;rio de acertos</h3><span class=\"tag\">Dia</span></header>",
+        "<div class=\"content\"><p><strong>Data:</strong> " + escapeHtml(source.date || analysisDateInput.value || todayInSaoPaulo()) + " | <strong>Palpites checados:</strong> " + escapeHtml(checked) + " | <strong>Relat&oacute;rios usados:</strong> " + escapeHtml(source.reportsFound || 0) + "</p>" + renderSourceDetails(source) + "</div>",
+        "</article>",
+        "<article class=\"analysis-card\" data-tone=\"medio\">",
+        "<header><h3>Placar do Tipster</h3><span class=\"tag\">Resumo</span></header>",
+        "<div class=\"content\"><p><strong>Bateram:</strong> " + escapeHtml(won) + " | <strong>N&atilde;o bateram:</strong> " + escapeHtml(lost) + " | <strong>Pendentes:</strong> " + escapeHtml(pending) + " | <strong>Conferir:</strong> " + escapeHtml(review) + (voided ? " | <strong>Anuladas:</strong> " + escapeHtml(voided) : "") + "</p></div>",
+        "</article>",
+        "<article class=\"analysis-card\" data-tone=\"baixo\">",
+        "<header><h3>Sele&ccedil;&otilde;es fechadas</h3><span class=\"tag\">Resultado</span></header>",
+        "<div class=\"content\"><table class=\"analysis-table\"><thead><tr><th>Jogo</th><th>Entrada</th><th>Resultado</th><th>Odd</th><th>Status</th></tr></thead><tbody>",
+        renderSettlementRows(items),
+        "</tbody></table></div>",
+        "</article>",
+        review ? "<article class=\"analysis-card\" data-tone=\"alto\"><header><h3>O que precisa conferir</h3><span class=\"tag\">Manual</span></header><div class=\"content\"><p>Mercados como escanteios, cart&otilde;es e chutes dependem de estat&iacute;sticas que nem sempre a API entrega no p&oacute;s-jogo. Quando isso acontecer, o app deixa em <strong>Conferir</strong> em vez de cravar errado.</p></div></article>" : ""
+      ].join("");
+    }
+
     function renderSetupError(data) {
       const setup = Array.isArray(data.setup) ? data.setup : ["Configure as vari\u00e1veis de ambiente no Netlify."];
       const detail = data.detail ? "<p class=\"muted\"><strong>Detalhe:</strong> " + escapeHtml(data.detail) + "</p>" : "";
@@ -2760,6 +2890,40 @@
             "Confirme que a Function /api/daily-picks foi publicada.",
             "Confirme a variavel API_FOOTBALL_KEY.",
             "Se quiser analise textual por IA, configure OPENAI_API_KEY ou AI Gateway."
+          ]
+        });
+      } finally {
+        triggerButton.disabled = false;
+        triggerButton.innerHTML = originalHtml;
+      }
+    }
+
+    async function runSettledPicks(triggerButton = settledPicksBtn) {
+      const originalHtml = triggerButton.innerHTML;
+      triggerButton.disabled = true;
+      triggerButton.textContent = "Fechando...";
+      outputEl.innerHTML = "<div class=\"empty-state\"><div><strong>Fechando acertos do dia</strong><span>Buscando os palpites salvos e comparando com placares/resultados da API.</span></div></div>";
+
+      try {
+        const params = new URLSearchParams({
+          date: analysisDateInput.value || todayInSaoPaulo()
+        });
+        const response = await fetch("/api/settled-picks?" + params.toString());
+        const data = await response.json();
+
+        if (!response.ok) {
+          renderSetupError(data);
+          return;
+        }
+
+        renderSettlementReport(data);
+      } catch (error) {
+        renderSetupError({
+          error: "Nao consegui carregar o relatorio de acertos.",
+          setup: [
+            "Confirme que a Function /api/settled-picks foi publicada.",
+            "Gere primeiro algum palpite de futebol no dia.",
+            "Confira se a API_FOOTBALL_KEY ainda tem quota."
           ]
         });
       } finally {
@@ -3118,6 +3282,11 @@
 
     dailyPicksBtn.addEventListener("click", () => {
       runDailyPicks();
+      saveState();
+    });
+
+    settledPicksBtn.addEventListener("click", () => {
+      runSettledPicks();
       saveState();
     });
 
