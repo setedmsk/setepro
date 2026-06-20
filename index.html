@@ -1399,33 +1399,6 @@
                   </svg>
                   <span class="btn-label">Bingo do 7</span>
                 </button>
-                <button class="btn btn-secondary" type="button" id="brSerieABtn" title="Melhores palpites do Brasileir&atilde;o S&eacute;rie A">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-                    <path d="M4 6h16"></path>
-                    <path d="M4 12h16"></path>
-                    <path d="M4 18h16"></path>
-                    <path d="M8 6v12"></path>
-                  </svg>
-                  <span class="btn-label">Brasileir&atilde;o S&eacute;rie A</span>
-                </button>
-                <button class="btn btn-secondary" type="button" id="brMixBtn" title="Misturar Brasileir&atilde;o S&eacute;rie A, B e C">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-                    <path d="M4 7h7v7H4z"></path>
-                    <path d="M13 7h7v7h-7z"></path>
-                    <path d="M8 16h8"></path>
-                    <path d="M12 12v8"></path>
-                  </svg>
-                  <span class="btn-label">Brasileir&atilde;o A+B+C</span>
-                </button>
-                <button class="btn btn-secondary" type="button" id="brSerieBcBtn" title="Melhores palpites do Brasileir&atilde;o S&eacute;rie B e C">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-                    <path d="M5 5h14v14H5z"></path>
-                    <path d="M9 9h6"></path>
-                    <path d="M9 13h6"></path>
-                    <path d="M9 17h4"></path>
-                  </svg>
-                  <span class="btn-label">Brasileir&atilde;o S&eacute;rie B/C</span>
-                </button>
                 <button class="btn btn-secondary" type="button" id="combatCourtBtn">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
                     <path d="M4 5h16"></path>
@@ -1637,9 +1610,6 @@
     const dailyPicksBtn = document.getElementById("dailyPicksBtn");
     const mixedPicksBtn = document.getElementById("mixedPicksBtn");
     const settledPicksBtn = document.getElementById("settledPicksBtn");
-    const brSerieABtn = document.getElementById("brSerieABtn");
-    const brMixBtn = document.getElementById("brMixBtn");
-    const brSerieBcBtn = document.getElementById("brSerieBcBtn");
     const combatCourtBtn = document.getElementById("combatCourtBtn");
     const esportsBtn = document.getElementById("esportsBtn");
     const backendStatusPill = document.getElementById("backendStatusPill");
@@ -3562,30 +3532,6 @@
 
     settledPicksBtn.addEventListener("click", () => {
       runSettledPicks();
-      saveState();
-    });
-
-    brSerieABtn.addEventListener("click", () => {
-      runDailyPicks(brSerieABtn, {
-        scope: "brasileirao_a",
-        label: "Brasileirao Serie A"
-      });
-      saveState();
-    });
-
-    brMixBtn.addEventListener("click", () => {
-      runDailyPicks(brMixBtn, {
-        scope: "brasileirao_mix",
-        label: "Brasileirao Series A+B+C"
-      });
-      saveState();
-    });
-
-    brSerieBcBtn.addEventListener("click", () => {
-      runDailyPicks(brSerieBcBtn, {
-        scope: "brasileirao_bc",
-        label: "Brasileirao Series B+C"
-      });
       saveState();
     });
 
