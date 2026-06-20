@@ -2170,8 +2170,12 @@
 
     async function copyTextToClipboard(text) {
       if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(text);
-        return;
+        try {
+          await navigator.clipboard.writeText(text);
+          return;
+        } catch {
+          // Fallback abaixo cobre browsers que bloqueiam a API moderna de clipboard.
+        }
       }
 
       const area = document.createElement("textarea");
@@ -2180,9 +2184,12 @@
       area.style.position = "fixed";
       area.style.left = "-9999px";
       document.body.appendChild(area);
+      area.focus();
       area.select();
-      document.execCommand("copy");
+      area.setSelectionRange(0, area.value.length);
+      const copied = document.execCommand("copy");
       document.body.removeChild(area);
+      if (!copied) throw new Error("Nao foi possivel copiar o bilhete.");
     }
 
     function renderRemoteSelection(selection) {
@@ -2405,7 +2412,7 @@
         rows,
         "</tbody></table>",
         totalOdd ? "<p><strong>Odd combinada:</strong> " + escapeHtml(formatOdd(Number(totalOdd))) + (possibleReturn ? " | <strong>Retorno:</strong> " + escapeHtml(currency.format(Number(possibleReturn))) : "") + "</p>" : "",
-        subtitle ? "<p class=\"muted\">" + escapeHtml(subtitle) + "</p>" : "",
+        subtitle ? "<p class=\"muted\">" + escapeHtml(formatDisplayText(subtitle)) + "</p>" : "",
         renderTicketActions(title, selections, totalOdd, possibleReturn),
         "</div>",
         "</article>"
@@ -2420,7 +2427,7 @@
       return "<div class=\"game-analysis\">" + items.map((item, index) => {
         const game = formatGameName(item);
         const market = item.bestMarket || item.market || item.recommendedMarket || "";
-        const reason = item.reason || item.analysis || item.context || item.status || "";
+        const reason = formatDisplayText(item.reason || item.analysis || item.context || item.status || "");
         const picks = Array.isArray(item.picks)
           ? item.picks
           : Array.isArray(item.selections)
@@ -2430,8 +2437,9 @@
               : [];
         const picksText = picks.length
           ? "<table class=\"analysis-table\"><thead><tr><th>Mercado</th><th>Sele&ccedil;&atilde;o</th><th>Odd</th></tr></thead><tbody>" + picks.map((pick) => {
-              const rawMarket = pick.market || pick.category || "--";
-              return "<tr><td>" + escapeHtml(formatMarketName(rawMarket)) + "</td><td>" + escapeHtml(formatSelectionName(pick.selection || pick.pick || "--", rawMarket)) + "</td><td>" + escapeHtml(pick.odd ? formatOdd(Number(pick.odd)) : "--") + "</td></tr>";
+              const repairedPick = repairRemoteSelection(pick);
+              const rawMarket = repairedPick.market || repairedPick.category || "--";
+              return "<tr><td>" + escapeHtml(formatMarketName(rawMarket)) + "</td><td>" + escapeHtml(formatSelectionName(repairedPick.selection || repairedPick.pick || "--", rawMarket)) + "</td><td>" + escapeHtml(repairedPick.odd ? formatOdd(Number(repairedPick.odd)) : "--") + "</td></tr>";
             }).join("") + "</tbody></table>"
           : "";
 
@@ -2453,10 +2461,10 @@
 
       return "<ul class=\"warning-list\">" + traps.map((trap) => {
         if (typeof trap === "string") {
-          return "<li>" + escapeHtml(trap) + "</li>";
+          return "<li>" + escapeHtml(formatDisplayText(trap)) + "</li>";
         }
         const title = formatGameName(trap);
-        const reason = trap.reason || trap.text || trap.explanation || "";
+        const reason = formatDisplayText(trap.reason || trap.text || trap.explanation || "");
         return "<li><strong>" + escapeHtml(title) + ":</strong> " + escapeHtml(reason) + "</li>";
       }).join("") + "</ul>";
     }
@@ -2465,8 +2473,8 @@
       if (name === undefined || name === null) return "";
       const raw = String(name);
       const normalized = normalizeTextForDisplay(raw);
-      const hasEnglishTerms = /\b(corner|goal|goals|card|cards|yellow|booking|shot|shots|over|under|winner|double chance|both teams|team to score|clean sheet|home away|asian)\b/i.test(raw);
-      const hasOverUnder = normalized.includes("over under") || normalized.includes("overunder") || normalized.includes("total");
+      const hasEnglishTerms = /\b(corner|corners|goal|goals|card|cards|yellow|booking|shot|shots|point|points|map|maps|over|under|winner|moneyline|double chance|both teams|team to score|clean sheet|home|away|draw|asian|spread|total|match)\b/i.test(raw);
+      const hasOverUnder = normalized.includes("over under") || normalized.includes("overunder") || normalized.includes("mais menos") || normalized.includes("total");
       const labels = {
         resultado_final: "resultado final",
         dupla_chance: "dupla chance",
@@ -2480,8 +2488,15 @@
       const direct = labels[raw] || labels[normalized.replace(/\s+/g, "_")];
       if (direct) return direct;
       if (normalized === "jogo") return "jogo";
-      if (normalized.includes("map") && hasOverUnder) return "total de mapas - mais/menos";
+      if (normalized === "total" || normalized === "over under") return "total da partida - mais/menos";
       if (normalized.includes("match winner") || normalized.includes("moneyline") || normalized === "winner") return "vencedor da partida";
+      if (normalized.includes("spread")) return "handicap/spread";
+      if (normalized.includes("map")) return hasOverUnder ? "total de mapas - mais/menos" : "mapas";
+      if (normalized.includes("point")) return hasOverUnder ? "total de pontos - mais/menos" : "pontos";
+      if (normalized.includes("total") && normalized.includes("home")) return "total do mandante - mais/menos";
+      if (normalized.includes("total") && normalized.includes("away")) return "total do visitante - mais/menos";
+      if (normalized.includes("home team total")) return "total do mandante - mais/menos";
+      if (normalized.includes("away team total")) return "total do visitante - mais/menos";
 
       if (!hasEnglishTerms) return raw.replace(/_/g, " ");
 
@@ -2519,10 +2534,10 @@
       if (normalized.includes("asian handicap")) return "handicap asiatico";
       if (normalized.includes("handicap")) return "handicap";
       if (normalized.includes("team to score")) return "time marca gol";
-      if (normalized.includes("clean sheet")) return "clean sheet";
+      if (normalized.includes("clean sheet")) return "sem sofrer gol";
       if (normalized.includes("winner") || normalized.includes("1x2") || normalized.includes("home away")) return "resultado final";
 
-      return raw.replace(/_/g, " ");
+      return formatDisplayText(raw.replace(/_/g, " "));
     }
 
     function formatSelectionName(name, market) {
@@ -2531,23 +2546,105 @@
       const normalized = normalizeTextForDisplay(raw);
       if (!normalized) return raw;
 
+      if (/^\d+([,.]\d+)?\s*\/\s*over$/i.test(raw)) return "Mais de " + raw.split("/")[0].trim();
+      if (/^\d+([,.]\d+)?\s*\/\s*under$/i.test(raw)) return "Menos de " + raw.split("/")[0].trim();
+
+      if (raw.includes("/")) {
+        return raw.split("/")
+          .map((part) => formatSelectionName(part.trim(), market))
+          .filter(Boolean)
+          .join(" + ");
+      }
+
       if (normalized === "yes") return "Sim";
-      if (normalized === "no") return "Nao";
+      if (normalized === "nao") return "N\u00e3o";
+      if (normalized === "no") return "N\u00e3o";
       if (normalized === "none") return "Nenhum";
       if (normalized === "draw" || normalized === "x") return "Empate";
       if (normalized === "home" || normalized === "1") return "Mandante";
       if (normalized === "away" || normalized === "2") return "Visitante";
       if (normalized === "home draw") return "Mandante ou empate";
+      if (normalized === "draw home") return "Mandante ou empate";
       if (normalized === "away draw") return "Visitante ou empate";
+      if (normalized === "draw away") return "Visitante ou empate";
       if (normalized === "home away") return "Mandante ou visitante";
-      if (/^\d+(\.\d+)?\s*\/\s*over$/.test(normalized)) return "Mais de " + raw.split("/")[0].trim();
-      if (/^\d+(\.\d+)?\s*\/\s*under$/.test(normalized)) return "Menos de " + raw.split("/")[0].trim();
+      if (normalized === "1x" || normalized === "x1") return "Mandante ou empate";
+      if (normalized === "x2" || normalized === "2x") return "Visitante ou empate";
+      if (normalized === "12" || normalized === "21") return "Mandante ou visitante";
       if (normalized.startsWith("over ")) return raw.replace(/^over/i, "Mais de");
       if (normalized.startsWith("under ")) return raw.replace(/^under/i, "Menos de");
       if (normalized.startsWith("home ")) return raw.replace(/^home/i, "Mandante");
       if (normalized.startsWith("away ")) return raw.replace(/^away/i, "Visitante");
 
-      return raw.replace(/_/g, " ");
+      return formatDisplayText(raw.replace(/_/g, " "));
+    }
+
+    function formatDisplayText(value) {
+      if (value === undefined || value === null) return "";
+      let text = String(value).replace(/_/g, " ");
+      const replacements = [
+        [/\bBoth Teams To Score\b/gi, "Ambas marcam"],
+        [/\bBoth Teams Score\b/gi, "Ambas marcam"],
+        [/\bBTTS\b/gi, "Ambas marcam"],
+        [/\bDouble Chance\b/gi, "Dupla chance"],
+        [/\bMatch Winner\b/gi, "Vencedor da partida"],
+        [/\bMatch Result\b/gi, "Resultado final"],
+        [/\bFulltime Result\b/gi, "Resultado final"],
+        [/\bMoneyline\b/gi, "Vencedor da partida"],
+        [/\bClean Sheet\b/gi, "Sem sofrer gol"],
+        [/\bTeam To Score\b/gi, "Time marca gol"],
+        [/\bOver\/Under\b/gi, "Mais/Menos"],
+        [/\bOver Under\b/gi, "Mais/Menos"],
+        [/\bTotal Goals\b/gi, "Total de gols"],
+        [/\bGoals\b/gi, "Gols"],
+        [/\bGoal\b/gi, "Gol"],
+        [/\bTotal Corners\b/gi, "Total de escanteios"],
+        [/\bCorners\b/gi, "Escanteios"],
+        [/\bCorner\b/gi, "Escanteio"],
+        [/\bYellow Cards\b/gi, "Cart\u00f5es amarelos"],
+        [/\bCards\b/gi, "Cart\u00f5es"],
+        [/\bCard\b/gi, "Cart\u00e3o"],
+        [/\bShots On Goal\b/gi, "Chutes ao gol"],
+        [/\bShots\b/gi, "Chutes"],
+        [/\bShot\b/gi, "Chute"],
+        [/\bTotal Points\b/gi, "Total de pontos"],
+        [/\bPoints\b/gi, "Pontos"],
+        [/\bPoint\b/gi, "Ponto"],
+        [/\bTotal Maps\b/gi, "Total de mapas"],
+        [/\bMaps\b/gi, "Mapas"],
+        [/\bMap\b/gi, "Mapa"],
+        [/\bSpread\b/gi, "Handicap/spread"],
+        [/\bAsian Handicap\b/gi, "Handicap asi\u00e1tico"],
+        [/\bHandicap Result\b/gi, "Resultado com handicap"],
+        [/\bTackles\b/gi, "Desarmes"],
+        [/\bTackle\b/gi, "Desarme"],
+        [/\bHome Team\b/gi, "Mandante"],
+        [/\bAway Team\b/gi, "Visitante"],
+        [/\bHome\b/gi, "Mandante"],
+        [/\bAway\b/gi, "Visitante"],
+        [/\bDraw\b/gi, "Empate"],
+        [/\bYes\b/gi, "Sim"],
+        [/\bNao\b/g, "N\u00e3o"],
+        [/\bNo\b/gi, "N\u00e3o"],
+        [/\bOver\b/gi, "Mais de"],
+        [/\bUnder\b/gi, "Menos de"],
+        [/\bReturn\b/gi, "Retorno"],
+        [/\bProbability\b/gi, "Probabilidade"],
+        [/\bRisk\b/gi, "Risco"],
+        [/\bBalanced\b/gi, "Equilibrado"],
+        [/\bConservative\b/gi, "Conservador"],
+        [/\bBold\b/gi, "Ousado"],
+      ];
+
+      replacements.forEach(([pattern, replacement]) => {
+        text = text.replace(pattern, replacement);
+      });
+
+      return text
+        .replace(/\bMais de\/Menos de\b/g, "Mais/Menos")
+        .replace(/\bmais de\/menos de\b/g, "mais/menos")
+        .replace(/\s{2,}/g, " ")
+        .trim();
     }
 
     function normalizeTextForDisplay(value) {
@@ -2621,7 +2718,7 @@
       if (!recommendation) return "";
 
       if (typeof recommendation === "string") {
-        return "<p>" + escapeHtml(recommendation) + "</p>";
+        return "<p>" + escapeHtml(formatDisplayText(recommendation)) + "</p>";
       }
 
       const selections = Array.isArray(recommendation.selections) ? recommendation.selections : [];
@@ -2631,7 +2728,7 @@
       const possibleReturn = Number.isFinite(Number(rawReturn))
         ? Number(rawReturn)
         : totalOdd ? totalOdd * Number(stakeInput.value || 5) : null;
-      const reason = recommendation.reason || recommendation.summary || recommendation.explanation || recommendation.text || "";
+      const reason = formatDisplayText(recommendation.reason || recommendation.summary || recommendation.explanation || recommendation.text || "");
       const rows = recommendationSelections.map((selection) => {
         const game = formatGameName(selection);
         const rawMarket = selection.market || selection.category || "Mercado";
@@ -2677,7 +2774,7 @@
       applyRemoteMetrics(data);
       const analysis = data.analysis || {};
       const source = data.source || {};
-      const summary = analysis.summary || "An\u00e1lise autom\u00e1tica conclu\u00edda com os dados encontrados.";
+      const summary = formatDisplayText(analysis.summary || "An\u00e1lise autom\u00e1tica conclu\u00edda com os dados encontrados.");
       const unmatched = source.unmatchedGames || [];
       const isPrintAnalysis = String(source.provider || "").toLowerCase().includes("print");
       const foundLabel = isPrintAnalysis ? "Itens lidos" : "Palpites encontrados";
@@ -2750,7 +2847,7 @@
           "<td>" + escapeHtml(formatMarketName(market)) + "<br><span class=\"muted\">" + escapeHtml(formatSelectionName(selection, market)) + "</span></td>",
           "<td>" + escapeHtml(item.result || "--") + "</td>",
           "<td>" + escapeHtml(odd) + "</td>",
-          "<td><span class=\"settlement-pill " + settlementStatusClass(status) + "\">" + escapeHtml(label) + "</span><br><span class=\"muted\">" + escapeHtml(item.reason || "") + "</span></td>",
+          "<td><span class=\"settlement-pill " + settlementStatusClass(status) + "\">" + escapeHtml(label) + "</span><br><span class=\"muted\">" + escapeHtml(formatDisplayText(item.reason || "")) + "</span></td>",
           "</tr>"
         ].join("");
       }).join("");
