@@ -70,6 +70,16 @@ function todayInSaoPaulo() {
   }).format(new Date());
 }
 
+function addDays(date: string, days: number) {
+  const next = new Date(`${date}T12:00:00.000Z`);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next.toISOString().slice(0, 10);
+}
+
+function isDateValue(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
 function normalizeText(value: string) {
   return value
     .normalize("NFD")
@@ -141,6 +151,44 @@ async function readReportsForDate(date: string) {
   });
 }
 
+async function listReportDates() {
+  const store = dailyStore();
+  const dates = new Set<string>();
+  const prefix = `reports/${REPORT_CACHE_VERSION}/`;
+
+  try {
+    const listed = await store.list({ prefix });
+    for (const blob of listed.blobs || []) {
+      const match = String(blob.key || "").match(/^reports\/[^/]+\/(\d{4}-\d{2}-\d{2})\//);
+      if (match) dates.add(match[1]);
+    }
+  } catch {
+    // Listing can be unavailable in local/dev stores; latest.json below is the fallback.
+  }
+
+  try {
+    const latest = await store.get("latest.json", { type: "json" }) as any;
+    if (latest?.source?.date) dates.add(String(latest.source.date));
+  } catch {
+    // No latest report yet.
+  }
+
+  return [...dates].sort().reverse();
+}
+
+async function resolveReportDate(requestedDate: string | null) {
+  const requested = String(requestedDate || "").trim().toLowerCase();
+  if (isDateValue(requested)) return requested;
+
+  const today = todayInSaoPaulo();
+  const yesterday = addDays(today, -1);
+  const dates = await listReportDates();
+
+  if (dates.includes(yesterday)) return yesterday;
+  if (dates.includes(today)) return today;
+  return dates[0] || yesterday;
+}
+
 function ticketSelections(ticket: any) {
   if (!ticket) return [];
   if (Array.isArray(ticket)) return ticket.filter(Boolean);
@@ -168,6 +216,8 @@ function pickSignature(selection: PickLike) {
 
 function categoryFor(selection: PickLike) {
   const normalized = normalizeText(`${selection.market || ""} ${selection.category || ""} ${selectionText(selection)}`);
+  if (isPeriodMarket(selection)) return "periodo";
+  if (normalized.includes("tackle") || normalized.includes("tackles") || normalized.includes("desarme") || normalized.includes("desarmes")) return "desarmes";
   if (normalized.includes("dupla") || normalized.includes("double chance")) return "dupla_chance";
   if (normalized.includes("ambas") || normalized.includes("btts") || normalized.includes("both teams")) return "ambas_marcam";
   if (normalized.includes("escanteio") || normalized.includes("canto") || normalized.includes("corner")) return "escanteios";
@@ -295,10 +345,13 @@ function resultSide(fixture: ApiFootballFixture) {
 
 function targetGoals(selection: PickLike, fixture: ApiFootballFixture) {
   const market = normalizeText(String(selection.market || ""));
+  const pick = normalizeText(selectionText(selection));
   const home = normalizeText(fixture.teams.home.name);
   const away = normalizeText(fixture.teams.away.name);
-  if (market.includes(home)) return Number(fixture.goals?.home || 0);
-  if (market.includes(away)) return Number(fixture.goals?.away || 0);
+  if (market.includes(home) || pick.includes(home)) return Number(fixture.goals?.home || 0);
+  if (market.includes(away) || pick.includes(away)) return Number(fixture.goals?.away || 0);
+  if (/\bhome\b/.test(market) || market.includes("mandante") || market.includes("casa")) return Number(fixture.goals?.home || 0);
+  if (/\baway\b/.test(market) || market.includes("visitante") || market.includes("fora")) return Number(fixture.goals?.away || 0);
   return Number(fixture.goals?.home || 0) + Number(fixture.goals?.away || 0);
 }
 
@@ -312,7 +365,12 @@ function evaluateGoals(selection: PickLike, fixture: ApiFootballFixture) {
 
 function evaluateBothTeamsScore(selection: PickLike, fixture: ApiFootballFixture) {
   const both = Number(fixture.goals?.home || 0) > 0 && Number(fixture.goals?.away || 0) > 0;
-  const wantsYes = normalizeText(selectionText(selection)).includes("sim");
+  const pick = normalizeText(selectionText(selection));
+  const wantsYes = pick.includes("sim") || pick.includes("yes");
+  const wantsNo = pick.includes("nao") || pick.includes("no");
+  if (!wantsYes && !wantsNo) {
+    return { status: "review" as PickStatus, reason: "Nao identifiquei se a entrada era Sim ou Nao para ambas marcam." };
+  }
   const status = wantsYes === both ? "won" : "lost";
   return { status: status as PickStatus, reason: `Ambos marcaram: ${both ? "sim" : "nao"} (${scoreLabel(fixture)}).` };
 }
@@ -368,6 +426,24 @@ function statValue(stats: any[], fixture: ApiFootballFixture, selection: PickLik
   return found ? total : null;
 }
 
+function isPeriodMarket(selection: PickLike) {
+  const raw = `${selection.market || ""} ${selection.category || ""} ${selectionText(selection)}`;
+  const normalized = normalizeText(raw);
+  return (
+    /\b\d{1,2}\s*m\s*[-–]\s*\d{1,2}\s*m\b/i.test(raw) ||
+    normalized.includes("primeiro tempo") ||
+    normalized.includes("segundo tempo") ||
+    normalized.includes("1 tempo") ||
+    normalized.includes("2 tempo") ||
+    normalized.includes("first half") ||
+    normalized.includes("second half") ||
+    normalized.includes("1st half") ||
+    normalized.includes("2nd half") ||
+    normalized.includes("halftime") ||
+    normalized.includes("half time")
+  );
+}
+
 async function fixtureStatistics(fixtureId: number) {
   try {
     return await apiFootball("/fixtures/statistics", { fixture: fixtureId });
@@ -388,8 +464,11 @@ async function evaluateSelection(selection: PickLike, fixture: ApiFootballFixtur
   if (category === "ambas_marcam") return evaluateBothTeamsScore(selection, fixture);
   if (category === "resultado_final") return evaluateWinner(selection, fixture);
   if (category === "dupla_chance") return evaluateDoubleChance(selection, fixture);
+  if (category === "periodo") {
+    return { status: "review" as PickStatus, reason: "Mercado por periodo/minuto precisa de eventos detalhados; deixei para conferencia manual." };
+  }
 
-  if (["escanteios", "cartoes", "chutes_gol"].includes(category)) {
+  if (["escanteios", "cartoes", "chutes_gol", "desarmes"].includes(category)) {
     const line = parseLine(selection);
     if (!line) return { status: "review" as PickStatus, reason: "Linha nao identificada automaticamente." };
     if (!statsCache.has(fixtureId)) statsCache.set(fixtureId, await fixtureStatistics(fixtureId));
@@ -398,7 +477,9 @@ async function evaluateSelection(selection: PickLike, fixture: ApiFootballFixtur
       ? ["corner"]
       : category === "cartoes"
         ? ["yellow cards", "red cards"]
-        : ["shots on goal"];
+        : category === "chutes_gol"
+          ? ["shots on goal"]
+          : ["tackles"];
     const value = statValue(stats, fixture, selection, patterns);
     if (value === null) {
       return { status: "review" as PickStatus, reason: "A API nao trouxe estatistica suficiente para confirmar esse mercado." };
@@ -427,7 +508,7 @@ function statusTone(status: PickStatus) {
 
 export default async (req: Request) => {
   const url = new URL(req.url);
-  const date = url.searchParams.get("date") || todayInSaoPaulo();
+  const date = await resolveReportDate(url.searchParams.get("date"));
 
   if (!getEnv("API_FOOTBALL_KEY")) {
     return json({

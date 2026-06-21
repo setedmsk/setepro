@@ -3109,7 +3109,7 @@
 
       try {
         const params = new URLSearchParams({
-          date: analysisDateInput.value || todayInSaoPaulo()
+          date: "auto"
         });
         const response = await fetch("/api/settled-picks?" + params.toString());
         const data = await response.json();
