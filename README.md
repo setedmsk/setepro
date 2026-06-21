@@ -9,8 +9,7 @@ A ideia do projeto e bem direta: voce informa os jogos ou envia um print da bet,
 - Le prints da tela da bet e tenta organizar jogo, mercado e odd.
 - Analisa jogos digitados manualmente.
 - Busca palpites de futebol apenas quando voce clica, para economizar API.
-- Tem botoes separados para Brasileirao Serie A, Brasileirao A+B+C e Brasileirao Serie B/C.
-- Tambem tem atalhos para basquete, volei e e-sports.
+- Tambem tem atalhos para basquete, volei, e-sports e o Bingo do 7 multi-esporte.
 - Evita mercados ruins ou dificeis, como handicap quebrado, linhas 0.25/0.75 e nomes crus tipo `Away`.
 - Usa cache por data, botao e mercados marcados para nao repetir busca desnecessaria.
 

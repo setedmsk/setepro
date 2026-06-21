@@ -1605,7 +1605,6 @@
     const betTypeInput = document.getElementById("betType");
     const stakeInput = document.getElementById("stake");
     const analyzeBtn = document.getElementById("analyzeBtn");
-    const bestBtn = document.getElementById("bestBtn");
     const liveAnalyzeBtn = document.getElementById("liveAnalyzeBtn");
     const dailyPicksBtn = document.getElementById("dailyPicksBtn");
     const mixedPicksBtn = document.getElementById("mixedPicksBtn");
@@ -3503,13 +3502,6 @@
       runSmartAnalysis(analyzeBtn);
       saveState();
     });
-
-    if (bestBtn) {
-      bestBtn.addEventListener("click", () => {
-        runSmartAnalysis(bestBtn);
-        saveState();
-      });
-    }
 
     liveAnalyzeBtn.addEventListener("click", () => {
       runBasketballPicks();

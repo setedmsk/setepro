@@ -295,7 +295,14 @@ function buildTicket(selections: MixedPick[], stake: number, reason: string) {
 }
 
 function buildGameByGame(picks: MixedPick[]) {
-  return picks.slice(0, 12).map((pick) => ({
+  const uniqueByEvent = new Map<string, MixedPick>();
+  for (const pick of picks) {
+    const key = pickEventKey(pick);
+    if (!uniqueByEvent.has(key)) uniqueByEvent.set(key, pick);
+    if (uniqueByEvent.size >= 12) break;
+  }
+
+  return [...uniqueByEvent.values()].map((pick) => ({
     game: pick.game,
     apiGame: pick.game,
     league: `${pick.sport} | ${pick.league}`,
@@ -323,7 +330,7 @@ export default async (req: Request) => {
 
   if (!picks.length) {
     return json({
-      error: "Nao encontrei selecoes suficientes para o Mix do dia",
+      error: "Nao encontrei selecoes suficientes para o Bingo do 7",
       detail: warnings.length ? warnings.join(" | ") : "As fontes responderam sem picks aproveitaveis.",
       setup: [
         "Tente futebol, basquete ou volei individual para ver qual fonte tem dados hoje.",
@@ -359,7 +366,7 @@ export default async (req: Request) => {
 
   return json({
     source: {
-      provider: "Tipster PRO Mix multi-esporte",
+      provider: "Sete PRO Bingo do 7 multi-esporte",
       date,
       generatedAt: new Date().toISOString(),
       timezone: DEFAULT_TIMEZONE,

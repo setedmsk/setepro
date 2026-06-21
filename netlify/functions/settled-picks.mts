@@ -446,9 +446,9 @@ export default async (req: Request) => {
     if (!reports.length || !selections.length) {
       return json({
         error: "Ainda nao existe palpite salvo para essa data",
-        detail: "Gere primeiro um palpite de futebol no Tipster PRO. Depois volte no relatorio de acertos.",
+        detail: "Gere primeiro um palpite de futebol no Sete PRO. Depois volte no relatorio de acertos.",
         setup: [
-          "Clique em Futebol hoje, Brasileirao Serie A, Brasileirao A+B+C ou Brasileirao Serie B/C.",
+          "Clique em Futebol hoje para gerar palpites salvos do dia.",
           "Depois que os jogos forem acontecendo, use Acertos do dia para fechar o resultado.",
         ],
       }, { status: 404 });
@@ -513,7 +513,7 @@ export default async (req: Request) => {
 
     return json({
       source: {
-        provider: "Tipster PRO + API-Football resultados",
+        provider: "Sete PRO + API-Football resultados",
         date,
         generatedAt: new Date().toISOString(),
         timezone: DEFAULT_TIMEZONE,
