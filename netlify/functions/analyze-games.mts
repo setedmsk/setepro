@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { externalServiceError, fetchWithTimeout, friendlyErrorPayload, missingConfig } from "./_shared/http.mts";
 
 declare const Netlify: {
   env: {
@@ -289,7 +290,7 @@ function matchFixture(requested: string, fixtures: ApiFootballFixture[]) {
 async function apiFootball(path: string, params: Record<string, string | number | undefined>) {
   const key = getEnv("API_FOOTBALL_KEY");
   if (!key) {
-    throw new Error("API_FOOTBALL_KEY ausente");
+    throw missingConfig("API_FOOTBALL_KEY", "API-Football");
   }
 
   const url = new URL(path, API_FOOTBALL_BASE);
@@ -299,14 +300,14 @@ async function apiFootball(path: string, params: Record<string, string | number 
     }
   });
 
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     headers: {
       "x-apisports-key": key,
     },
-  });
+  }, 8000, "API-Football");
 
   if (!response.ok) {
-    throw new Error(`API-Football retornou ${response.status} em ${path}`);
+    throw externalServiceError("API-Football", `HTTP ${response.status} em ${path}`, response.status === 429 ? 429 : 502);
   }
 
   const data = await response.json();
@@ -314,7 +315,8 @@ async function apiFootball(path: string, params: Record<string, string | number 
     ? Object.values(data.errors).flat().filter(Boolean)
     : [];
   if (apiErrors.length) {
-    throw new Error(`API-Football: ${apiErrors.join(" | ")}`);
+    const detail = apiErrors.join(" | ");
+    throw externalServiceError("API-Football", detail, /quota|rate|limit|too many/i.test(detail) ? 429 : 502);
   }
   return data.response || [];
 }
@@ -1272,15 +1274,15 @@ export default async (req: Request) => {
       timezone: DEFAULT_TIMEZONE,
     });
   } catch (error: any) {
+    const friendly = friendlyErrorPayload(error, "API-Football falhou ao buscar fixtures");
     return json({
-      error: "API-Football falhou ao buscar fixtures",
-      detail: error?.message || "Erro desconhecido na API-Football.",
+      ...friendly.body,
       setup: [
         "Confira se a API_FOOTBALL_KEY esta ativa e com quota.",
         "Confira se seu plano permite fixtures e odds da competicao.",
         "Tente novamente em alguns minutos se o provedor estiver limitando requisicoes."
       ],
-    }, { status: 502 });
+    }, { status: friendly.status === 500 ? 502 : friendly.status });
   }
 
   let matchResults = requestedGames.map((game) => ({

@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { fetchWithTimeout, friendlyErrorPayload } from "./_shared/http.mts";
 
 declare const Netlify: {
   env: {
@@ -302,11 +303,11 @@ async function apiFootball(path: string, params: Record<string, string | number 
     }
   });
 
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     headers: {
       "x-apisports-key": key,
     },
-  });
+  }, 8000, "API-Football");
 
   if (!response.ok) return [];
 
@@ -1293,15 +1294,15 @@ export default async (req: Request) => {
   try {
     enrichedResult = await enrichSelections(extracted.selections, date, requestedMarkets);
   } catch (error: any) {
+    const friendly = friendlyErrorPayload(error, "API-Football falhou ao cruzar os jogos do print");
     return json({
-      error: "API-Football falhou ao cruzar os jogos do print",
-      detail: error?.message || "Erro desconhecido na API-Football.",
+      ...friendly.body,
       setup: [
         "A leitura do print funcionou, mas a busca esportiva falhou.",
         "Confira quota/permissao da API_FOOTBALL_KEY no provedor.",
         "Tente novamente em alguns minutos se a API estiver limitando requisicoes."
       ],
-    }, { status: 502 });
+    }, { status: friendly.status === 500 ? 502 : friendly.status });
   }
   const allEnriched = enrichedResult.selections;
   const printSelectionsForMarkets = applyMarketFilter(allEnriched, requestedMarkets);

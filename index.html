@@ -2085,7 +2085,7 @@
         const data = await response.json();
         lastHealthStatus = data;
         if (!response.ok) {
-          setBackendStatus("down", "Backend erro", data.error || "Health check falhou");
+          setBackendStatus("down", "Backend erro", data.message || data.error || "Health check falhou");
           return;
         }
 
@@ -3692,13 +3692,27 @@
       appendHistorySnapshot(source.date || analysisDateInput.value || todayInSaoPaulo());
     }
 
+    function readableBackendError(data, fallback) {
+      const messages = {
+        timeout: "A API demorou demais para responder. Tente novamente em alguns segundos.",
+        misconfigured: "Servico temporariamente indisponivel por configuracao.",
+        rate_limited: "Limite do provedor atingido. Tente novamente mais tarde.",
+        no_data: "Nao encontrei dados suficientes para essa consulta.",
+        external_service_error: "O provedor de dados nao respondeu como esperado.",
+        unexpected: "Erro inesperado no backend.",
+      };
+      const code = String((data && data.error) || "");
+      return (data && (data.message || messages[code] || data.error)) || fallback;
+    }
+
     function renderSetupError(data) {
       const setup = Array.isArray(data.setup) ? data.setup : ["Configure as vari\u00e1veis de ambiente no Netlify."];
       const detail = data.detail ? "<p class=\"muted\"><strong>Detalhe:</strong> " + escapeHtml(data.detail) + "</p>" : "";
+      const message = readableBackendError(data, "Falta configurar API");
       outputEl.innerHTML = [
         "<article class=\"analysis-card\" data-tone=\"alto\">",
         "<header><h3>Backend / dados</h3><span class=\"tag\">Aten&ccedil;&atilde;o</span></header>",
-        "<div class=\"content\"><p>" + escapeHtml(data.error || "Falta configurar API") + "</p>" + detail + "<ul><li>" + setup.map(escapeHtml).join("</li><li>") + "</li></ul></div>",
+        "<div class=\"content\"><p>" + escapeHtml(message) + "</p>" + detail + "<ul><li>" + setup.map(escapeHtml).join("</li><li>") + "</li></ul></div>",
         "</article>"
       ].join("");
     }

@@ -1,3 +1,5 @@
+import { fetchWithTimeout } from "./_shared/http.mts";
+
 declare const Netlify: {
   env: {
     get(name: string): string | undefined;
@@ -197,7 +199,7 @@ function collectReportPicks(report: any) {
 async function fetchJson(req: Request, path: string, params: URLSearchParams) {
   const url = new URL(path, new URL(req.url).origin);
   params.forEach((value, key) => url.searchParams.append(key, value));
-  const response = await fetch(url);
+  const response = await fetchWithTimeout(url, {}, 12000, "Mix do dia");
   const data = await response.json().catch(() => ({}));
   return {
     ok: response.ok,

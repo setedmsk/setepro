@@ -1,5 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import { sendPushToAll } from "./_shared/push.mts";
+import { externalServiceError, fetchWithTimeout, friendlyErrorPayload, missingConfig } from "./_shared/http.mts";
 
 declare const Netlify: {
   env: {
@@ -95,26 +96,29 @@ function normalizeText(value: string) {
 
 async function apiFootball(path: string, params: Record<string, string | number | undefined>) {
   const key = getEnv("API_FOOTBALL_KEY");
-  if (!key) throw new Error("API_FOOTBALL_KEY ausente");
+  if (!key) throw missingConfig("API_FOOTBALL_KEY", "API-Football");
 
   const url = new URL(path, API_FOOTBALL_BASE);
   Object.entries(params).forEach(([name, value]) => {
     if (value !== undefined && value !== "") url.searchParams.set(name, String(value));
   });
 
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     headers: {
       "x-apisports-key": key,
     },
-  });
+  }, 8000, "API-Football");
 
-  if (!response.ok) throw new Error(`API-Football retornou ${response.status} em ${path}`);
+  if (!response.ok) throw externalServiceError("API-Football", `HTTP ${response.status} em ${path}`, response.status === 429 ? 429 : 502);
 
   const data = await response.json();
   const apiErrors = data.errors && typeof data.errors === "object"
     ? Object.values(data.errors).flat().filter(Boolean)
     : [];
-  if (apiErrors.length) throw new Error(`API-Football: ${apiErrors.join(" | ")}`);
+  if (apiErrors.length) {
+    const detail = apiErrors.join(" | ");
+    throw externalServiceError("API-Football", detail, /quota|rate|limit|too many/i.test(detail) ? 429 : 502);
+  }
   return data.response || [];
 }
 
@@ -910,15 +914,15 @@ export default async (req: Request) => {
     await notifySettlementIfNeeded(responseBody);
     return json(responseBody);
   } catch (error: any) {
+    const friendly = friendlyErrorPayload(error, "Nao consegui gerar o relatorio de acertos");
     return json({
-      error: "Nao consegui gerar o relatorio de acertos",
-      detail: error?.message || "Erro desconhecido ao consultar resultados.",
+      ...friendly.body,
       setup: [
         "No modo economico, gere/salve palpites apos os jogos para o relatorio usar placares ja salvos.",
         "Se precisar atualizar placares ao vivo, use refresh=1 no endpoint e confira a quota da API_FOOTBALL_KEY.",
         "Confira se ja existe palpite salvo para o dia escolhido.",
       ],
-    }, { status: 502 });
+    }, { status: friendly.status === 500 ? 502 : friendly.status });
   }
 };
 

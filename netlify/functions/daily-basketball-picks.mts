@@ -1,4 +1,5 @@
 import { getStore } from "@netlify/blobs";
+import { externalServiceError, fetchWithTimeout, friendlyErrorPayload } from "./_shared/http.mts";
 
 declare const Netlify: {
   env: {
@@ -164,14 +165,14 @@ async function apiBasketball(path: string, params: Record<string, string | numbe
     if (value !== undefined && value !== "") url.searchParams.set(name, String(value));
   }
 
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     headers: {
       "x-apisports-key": key,
     },
-  });
+  }, 8000, "API-Basketball");
 
   if (!response.ok) {
-    throw new Error(`API-Basketball HTTP ${response.status}`);
+    throw externalServiceError("API-Basketball", `HTTP ${response.status}`, response.status === 429 ? 429 : 502);
   }
 
   const data = await response.json();
@@ -181,7 +182,8 @@ async function apiBasketball(path: string, params: Record<string, string | numbe
       ? Object.values(data.errors)
       : [];
   if (errors.length) {
-    throw new Error(`API-Basketball: ${errors.join(" | ")}`);
+    const detail = errors.join(" | ");
+    throw externalServiceError("API-Basketball", detail, /quota|rate|limit|too many/i.test(detail) ? 429 : 502);
   }
 
   return data.response || [];
@@ -673,15 +675,15 @@ export default async (req: Request) => {
     await saveReport(report);
     return json(report);
   } catch (error: any) {
+    const friendly = friendlyErrorPayload(error, "Nao consegui gerar os palpites de Basquete");
     return json({
-      error: "Nao consegui gerar os palpites de Basquete",
-      detail: error?.message || "Erro desconhecido na busca de dados.",
+      ...friendly.body,
       setup: [
         "Confira se API_BASKETBALL_KEY ou API_FOOTBALL_KEY tem acesso a API-Basketball.",
         "Confira se ainda existe quota no plano da API-Sports.",
         "Tente novamente em alguns minutos se a API estiver limitando requisicoes.",
       ],
-    }, { status: 502 });
+    }, { status: friendly.status === 500 ? 502 : friendly.status });
   }
 };
 

@@ -1,4 +1,5 @@
 import { getStore } from "@netlify/blobs";
+import { externalServiceError, fetchWithTimeout, friendlyErrorPayload } from "./_shared/http.mts";
 
 declare const Netlify: {
   env: {
@@ -175,7 +176,7 @@ async function apiOddsPapi(path: string, params: Record<string, string | number 
     if (value !== undefined && value !== "") url.searchParams.set(name, String(value));
   }
 
-  const response = await fetch(url);
+  const response = await fetchWithTimeout(url, {}, 8000, "OddsPapi");
   if (!response.ok) {
     let detail = response.statusText || "Erro sem detalhe";
     try {
@@ -188,13 +189,14 @@ async function apiOddsPapi(path: string, params: Record<string, string | number 
     } catch {
       // Keep the HTTP status when the API does not return JSON.
     }
-    throw new Error(`OddsPapi HTTP ${response.status}: ${detail}`);
+    throw externalServiceError("OddsPapi", `HTTP ${response.status}: ${detail}`, response.status === 429 ? 429 : 502);
   }
 
   const data = await response.json();
-  if (data?.error) throw new Error(`OddsPapi: ${String(data.error)}`);
+  if (data?.error) throw externalServiceError("OddsPapi", String(data.error));
   if (Array.isArray(data?.errors) && data.errors.length) {
-    throw new Error(`OddsPapi: ${data.errors.join(" | ")}`);
+    const detail = data.errors.join(" | ");
+    throw externalServiceError("OddsPapi", detail, /quota|rate|limit|too many/i.test(detail) ? 429 : 502);
   }
   return data?.data ?? data?.response ?? data?.results ?? data;
 }
@@ -964,16 +966,15 @@ export default async (req: Request) => {
     await saveReport(report);
     return json(report);
   } catch (error: any) {
-    const detail = error?.message || "Erro desconhecido na busca de odds.";
+    const friendly = friendlyErrorPayload(error, "Nao consegui gerar os palpites de E-sports");
     return json({
-      error: "Nao consegui gerar os palpites de E-sports",
-      detail,
+      ...friendly.body,
       setup: [
         "Confira se ODDSPAPI_KEY ou ODDS_PAPI_KEY esta configurada no Netlify.",
         "Confirme que o plano da OddsPapi libera mercados de e-sports.",
         "Tente novamente mais tarde se a OddsPapi estiver limitando chamadas.",
       ],
-    }, { status: 502 });
+    }, { status: friendly.status === 500 ? 502 : friendly.status });
   }
 };
 

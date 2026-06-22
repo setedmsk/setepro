@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { fetchWithTimeout, friendlyErrorPayload } from "./_shared/http.mts";
 
 declare const Netlify: {
   env: {
@@ -192,9 +193,9 @@ async function apiFootball(path: string, params: Record<string, string | number 
   Object.entries(params).forEach(([name, value]) => {
     if (value !== undefined && value !== "") url.searchParams.set(name, String(value));
   });
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     headers: { "x-apisports-key": key },
-  });
+  }, 8000, "API-Football");
   if (!response.ok) return [];
   const data = await response.json();
   return data.response || [];
@@ -589,7 +590,20 @@ export default async (req: Request) => {
   if (!text) return json({ error: "Informe selecoes para analisar" }, { status: 400 });
 
   const selections = parseSelections(text);
-  const allEnriched = await enrichSelections(selections, date);
+  let allEnriched;
+  try {
+    allEnriched = await enrichSelections(selections, date);
+  } catch (error: any) {
+    const friendly = friendlyErrorPayload(error, "API-Football falhou ao cruzar os jogos do bilhete");
+    return json({
+      ...friendly.body,
+      setup: [
+        "O texto do bilhete foi recebido, mas a busca esportiva falhou.",
+        "Confira quota/permissao da API_FOOTBALL_KEY no provedor.",
+        "Tente novamente em alguns minutos se a API estiver limitando requisicoes.",
+      ],
+    }, { status: friendly.status === 500 ? 502 : friendly.status });
+  }
   const enriched = applyMarketFilter(allEnriched, requestedMarkets);
   const payload = {
     generatedAt: new Date().toISOString(),
