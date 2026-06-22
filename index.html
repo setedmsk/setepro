@@ -399,6 +399,7 @@
     .segment,
     .market-option {
       position: relative;
+      min-width: 0;
     }
 
     .segment input,
@@ -437,28 +438,33 @@
     .market-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 8px;
+      gap: 7px;
     }
 
     .market-option span {
       display: flex;
-      min-height: 40px;
+      min-height: 42px;
       align-items: center;
-      gap: 8px;
-      padding: 0 10px;
+      gap: 7px;
+      min-width: 0;
+      padding: 7px 8px;
       border: 1px solid var(--border);
       border-radius: var(--radius);
       background: rgba(5, 5, 13, 0.82);
       color: var(--text);
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 750;
+      line-height: 1.08;
+      text-align: left;
+      white-space: normal;
+      overflow-wrap: anywhere;
       transition: border-color 160ms ease, background 160ms ease, color 160ms ease;
     }
 
     .market-option span::before {
       content: "";
-      width: 16px;
-      height: 16px;
+      width: 15px;
+      height: 15px;
       flex: 0 0 auto;
       border: 1.5px solid var(--border-strong);
       border-radius: 4px;
@@ -1351,9 +1357,12 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
 
-      .segmented,
-      .market-grid {
+      .segmented {
         grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .market-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
       }
 
       .cards-grid {
