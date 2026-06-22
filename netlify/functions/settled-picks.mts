@@ -304,8 +304,7 @@ async function resolveReportDate(requestedDate: string | null) {
   const yesterday = addDays(today, -1);
   const dates = await listReportDates();
 
-  if (dates.includes(yesterday)) return yesterday;
-  if (dates.includes(today)) return today;
+  if (dates.length) return dates[0];
   return dates[0] || yesterday;
 }
 
