@@ -9,6 +9,8 @@ declare const Netlify: {
 const API_FOOTBALL_BASE = "https://v3.football.api-sports.io";
 const DEFAULT_TIMEZONE = "America/Sao_Paulo";
 const REPORT_CACHE_VERSION = "manual-br-v1";
+const VOLLEYBALL_CACHE_VERSION = "volley-points-v2";
+const SETTLEMENT_CACHE_VERSION = "multi-sport-v1";
 
 type ApiFootballFixture = {
   fixture: {
@@ -45,6 +47,7 @@ type PickLike = {
   bookmaker?: string;
   league?: string;
   startsAt?: string;
+  sport?: string;
 };
 
 function json(data: unknown, init: ResponseInit = {}) {
@@ -118,6 +121,14 @@ function dailyStore() {
   return getStore({ name: "daily-picks", consistency: "strong" });
 }
 
+function basketballStore() {
+  return getStore({ name: "daily-basketball-picks", consistency: "strong" });
+}
+
+function volleyballStore() {
+  return getStore({ name: "daily-volleyball-picks", consistency: "strong" });
+}
+
 function settlementStore() {
   return getStore({ name: "settled-picks", consistency: "strong" });
 }
@@ -129,7 +140,7 @@ function isUsefulSettlement(report: any) {
 
 async function readCachedSettlement(date: string) {
   try {
-    const report = await settlementStore().get(`reports/${date}.json`, { type: "json" });
+    const report = await settlementStore().get(`reports/${SETTLEMENT_CACHE_VERSION}/${date}.json`, { type: "json" });
     return isUsefulSettlement(report) ? report : null;
   } catch {
     return null;
@@ -144,14 +155,23 @@ async function saveSettlement(report: any) {
 
   try {
     const store = settlementStore();
-    await store.setJSON(`reports/${report.source.date}.json`, report);
+    await store.setJSON(`reports/${SETTLEMENT_CACHE_VERSION}/${report.source.date}.json`, report);
     await store.setJSON("latest.json", report);
   } catch {
     // The report can still be returned even when Blob persistence is unavailable.
   }
 }
 
-async function readReportsForDate(date: string) {
+function withSettlementSport(report: any, sport: string) {
+  return report
+    ? {
+        ...report,
+        settlementSport: sport,
+      }
+    : null;
+}
+
+async function readFootballReportsForDate(date: string) {
   const store = dailyStore();
   const reports: any[] = [];
   const seen = new Set<string>();
@@ -164,7 +184,7 @@ async function readReportsForDate(date: string) {
       if (!key || seen.has(key)) continue;
       seen.add(key);
       const report = await store.get(key, { type: "json" });
-      if (report) reports.push(report);
+      if (report) reports.push(withSettlementSport(report, "football"));
     }
   } catch {
     // Local/dev stores may not support listing; latest.json below is the fallback.
@@ -173,7 +193,7 @@ async function readReportsForDate(date: string) {
   try {
     const latest = await store.get("latest.json", { type: "json" }) as any;
     if (latest?.source?.date === date && !seen.has("latest.json")) {
-      reports.push(latest);
+      reports.push(withSettlementSport(latest, "football"));
     }
   } catch {
     // No cached report yet.
@@ -182,6 +202,41 @@ async function readReportsForDate(date: string) {
   return reports.filter((report) => {
     return report?.source?.date === date && Array.isArray(report?.raw?.picks);
   });
+}
+
+async function readSingleReportForDate(store: ReturnType<typeof getStore>, date: string, key: string, sport: string) {
+  const reports: any[] = [];
+
+  try {
+    const report = await store.get(key, { type: "json" }) as any;
+    if (report?.source?.date === date && Array.isArray(report?.raw?.picks)) {
+      reports.push(withSettlementSport(report, sport));
+    }
+  } catch {
+    // No cached report for this sport/date.
+  }
+
+  try {
+    const latest = await store.get("latest.json", { type: "json" }) as any;
+    if (latest?.source?.date === date && Array.isArray(latest?.raw?.picks)) {
+      const alreadyAdded = reports.some((report) => String(report?.source?.provider || "") === String(latest?.source?.provider || ""));
+      if (!alreadyAdded) reports.push(withSettlementSport(latest, sport));
+    }
+  } catch {
+    // No latest report for this sport.
+  }
+
+  return reports;
+}
+
+async function readReportsForDate(date: string) {
+  const [football, basketball, volleyball] = await Promise.all([
+    readFootballReportsForDate(date),
+    readSingleReportForDate(basketballStore(), date, `reports/${date}.json`, "basketball"),
+    readSingleReportForDate(volleyballStore(), date, `reports/${VOLLEYBALL_CACHE_VERSION}/${date}.json`, "volleyball"),
+  ]);
+
+  return [...football, ...basketball, ...volleyball];
 }
 
 async function listReportDates() {
@@ -206,10 +261,32 @@ async function listReportDates() {
     // No latest report yet.
   }
 
+  for (const [extraStore, prefix] of [
+    [basketballStore(), "reports/"],
+    [volleyballStore(), `reports/${VOLLEYBALL_CACHE_VERSION}/`],
+  ] as const) {
+    try {
+      const listed = await extraStore.list({ prefix });
+      for (const blob of listed.blobs || []) {
+        const match = String(blob.key || "").match(/(\d{4}-\d{2}-\d{2})\.json$/);
+        if (match) dates.add(match[1]);
+      }
+    } catch {
+      // Extra sport stores are optional.
+    }
+
+    try {
+      const latest = await extraStore.get("latest.json", { type: "json" }) as any;
+      if (latest?.source?.date) dates.add(String(latest.source.date));
+    } catch {
+      // No latest report for this sport.
+    }
+  }
+
   try {
     const settlements = await settlementStore().list({ prefix: "reports/" });
     for (const blob of settlements.blobs || []) {
-      const match = String(blob.key || "").match(/^reports\/(\d{4}-\d{2}-\d{2})\.json$/);
+      const match = String(blob.key || "").match(/^reports\/[^/]+\/(\d{4}-\d{2}-\d{2})\.json$/);
       if (match) dates.add(match[1]);
     }
   } catch {
@@ -248,8 +325,17 @@ function selectionText(selection: PickLike) {
   return String(selection.selection || selection.pick || selection.value || "");
 }
 
+function selectionSport(selection: PickLike) {
+  const normalized = normalizeText(String(selection.sport || ""));
+  if (normalized.includes("basket")) return "basketball";
+  if (normalized.includes("volley") || normalized.includes("volei")) return "volleyball";
+  if (normalized.includes("foot") || normalized.includes("futebol") || normalized.includes("soccer")) return "football";
+  return "football";
+}
+
 function pickSignature(selection: PickLike) {
   return [
+    selectionSport(selection),
     selectionFixtureId(selection),
     normalizeText(String(selection.market || selection.category || "")),
     normalizeText(selectionText(selection)),
@@ -267,7 +353,7 @@ function categoryFor(selection: PickLike) {
   if (normalized.includes("cartao") || normalized.includes("cartoes") || normalized.includes("card") || normalized.includes("booking")) return "cartoes";
   if (normalized.includes("chute") || normalized.includes("finalizacao") || normalized.includes("shot")) return "chutes_gol";
   if (normalized.includes("gol") || normalized.includes("gols") || normalized.includes("goal") || normalized.includes("mais") || normalized.includes("menos") || normalized.includes("over") || normalized.includes("under") || normalized.includes("total")) return "mais_menos_gols";
-  if (normalized.includes("resultado") || normalized.includes("vitoria") || normalized.includes("vence") || normalized.includes("winner") || normalized.includes("1x2")) return "resultado_final";
+  if (normalized.includes("resultado") || normalized.includes("vitoria") || normalized.includes("vence") || normalized.includes("vencedor") || normalized.includes("winner") || normalized.includes("1x2")) return "resultado_final";
   return "outros";
 }
 
@@ -295,6 +381,7 @@ function findRawPick(selection: PickLike, rawPicks: PickLike[]) {
 function collectReportSelections(report: any) {
   const rawPicks = Array.isArray(report?.raw?.picks) ? report.raw.picks : [];
   const analysis = report?.analysis || {};
+  const sport = String(report?.settlementSport || "");
   const tickets = [
     { name: "Principal", ticket: analysis.mainRecommendation },
     { name: "Conservador", ticket: analysis.conservativeTicket },
@@ -310,8 +397,9 @@ function collectReportSelections(report: any) {
         ...(raw || {}),
         ...selection,
         fixtureId: selectionFixtureId(selection) || selectionFixtureId(raw || {}),
+        sport: selection.sport || raw?.sport || sport || "football",
         ticketName: item.name,
-        sourceLabel: report?.source?.scopeLabel || "Palpites do dia",
+        sourceLabel: report?.source?.scopeLabel || (sport === "basketball" ? "Basquete" : sport === "volleyball" ? "Volei" : "Palpites do dia"),
       });
     }
   }
@@ -320,8 +408,9 @@ function collectReportSelections(report: any) {
     for (const pick of rawPicks) {
       selections.push({
         ...pick,
+        sport: pick.sport || sport || "football",
         ticketName: "Palpite",
-        sourceLabel: report?.source?.scopeLabel || "Palpites do dia",
+        sourceLabel: report?.source?.scopeLabel || (sport === "basketball" ? "Basquete" : sport === "volleyball" ? "Volei" : "Palpites do dia"),
       });
     }
   }
@@ -334,26 +423,32 @@ function collectSelections(reports: any[]) {
   for (const report of reports) {
     for (const selection of collectReportSelections(report)) {
       const key = pickSignature(selection);
-      if (!key.startsWith("0|") && !byKey.has(key)) byKey.set(key, selection);
+      if (!key.includes("|0|") && !byKey.has(key)) byKey.set(key, selection);
     }
   }
   return [...byKey.values()];
 }
 
 function fixtureIdFromFixture(fixture: ApiFootballFixture) {
-  return Number(fixture?.fixture?.id || 0);
+  return Number((fixture as any)?.fixture?.id || (fixture as any)?.id || 0);
 }
 
 function collectStoredFixtures(reports: any[]) {
-  const byId = new Map<number, ApiFootballFixture>();
+  const byId = new Map<string, ApiFootballFixture>();
   for (const report of reports) {
+    const sport = String(report?.settlementSport || "football");
     const fixtures = Array.isArray(report?.raw?.fixtures) ? report.raw.fixtures : [];
     for (const fixture of fixtures) {
       const fixtureId = fixtureIdFromFixture(fixture);
-      if (fixtureId && !byId.has(fixtureId)) byId.set(fixtureId, fixture);
+      const key = fixtureKey(sport, fixtureId);
+      if (fixtureId && !byId.has(key)) byId.set(key, fixture);
     }
   }
   return byId;
+}
+
+function fixtureKey(sport: string, fixtureId: number) {
+  return `${sport || "football"}:${fixtureId}`;
 }
 
 function goalValue(fixture: ApiFootballFixture, side: "home" | "away") {
@@ -361,12 +456,30 @@ function goalValue(fixture: ApiFootballFixture, side: "home" | "away") {
   if (goals !== null && goals !== undefined) return Number(goals);
   const fulltime = (fixture as any)?.score?.fulltime?.[side];
   if (fulltime !== null && fulltime !== undefined) return Number(fulltime);
+  const scoreTotal = (fixture as any)?.scores?.[side]?.total;
+  if (scoreTotal !== null && scoreTotal !== undefined) return Number(scoreTotal);
+  const directScore = (fixture as any)?.scores?.[side];
+  if (directScore !== null && directScore !== undefined && typeof directScore !== "object") return Number(directScore);
   return NaN;
 }
 
+function fixtureStatusShort(fixture: ApiFootballFixture) {
+  return String((fixture as any)?.fixture?.status?.short || (fixture as any)?.status?.short || "");
+}
+
+function fixtureStatusLong(fixture: ApiFootballFixture) {
+  return String((fixture as any)?.fixture?.status?.long || (fixture as any)?.status?.long || "");
+}
+
 function isFinished(fixture: ApiFootballFixture) {
-  const status = fixture.fixture.status?.short || "";
-  return ["FT", "AET", "PEN"].includes(status);
+  const status = normalizeText(`${fixtureStatusShort(fixture)} ${fixtureStatusLong(fixture)}`);
+  return (
+    ["ft", "aet", "pen", "aot", "ap"].some((item) => status.split(" ").includes(item)) ||
+    status.includes("match finished") ||
+    status.includes("finished") ||
+    status.includes("after overtime") ||
+    status.includes("ended")
+  );
 }
 
 function isPending(fixture: ApiFootballFixture) {
@@ -400,7 +513,7 @@ function scoreLabel(fixture: ApiFootballFixture) {
   const away = goalValue(fixture, "away");
   return Number.isFinite(home) && Number.isFinite(away)
     ? `${home}-${away}`
-    : fixture.fixture.status?.long || "Sem placar";
+    : fixtureStatusLong(fixture) || "Sem placar";
 }
 
 function resultSide(fixture: ApiFootballFixture) {
@@ -416,11 +529,32 @@ function targetGoals(selection: PickLike, fixture: ApiFootballFixture) {
   const pick = normalizeText(selectionText(selection));
   const home = normalizeText(fixture.teams.home.name);
   const away = normalizeText(fixture.teams.away.name);
+  const periodTotal = fixturePeriodPoints(fixture);
   if (market.includes(home) || pick.includes(home)) return goalValue(fixture, "home");
   if (market.includes(away) || pick.includes(away)) return goalValue(fixture, "away");
   if (/\bhome\b/.test(market) || market.includes("mandante") || market.includes("casa")) return goalValue(fixture, "home");
   if (/\baway\b/.test(market) || market.includes("visitante") || market.includes("fora")) return goalValue(fixture, "away");
+  if (selectionSport(selection) === "volleyball" && Number.isFinite(periodTotal) && periodTotal > 0) return periodTotal;
   return goalValue(fixture, "home") + goalValue(fixture, "away");
+}
+
+function fixturePeriodPoints(fixture: ApiFootballFixture) {
+  const periods = (fixture as any)?.periods || {};
+  let total = 0;
+  let found = false;
+  for (const period of Object.values(periods) as any[]) {
+    const home = Number(period?.home);
+    const away = Number(period?.away);
+    if (Number.isFinite(home)) {
+      total += home;
+      found = true;
+    }
+    if (Number.isFinite(away)) {
+      total += away;
+      found = true;
+    }
+  }
+  return found ? total : NaN;
 }
 
 function evaluateGoals(selection: PickLike, fixture: ApiFootballFixture) {
@@ -525,7 +659,7 @@ async function evaluateSelection(selection: PickLike, fixture: ApiFootballFixtur
   const category = categoryFor(selection);
 
   if (isPending(fixture)) {
-    return { status: "pending" as PickStatus, reason: `Jogo ainda nao finalizado (${fixture.fixture.status?.long || "status aberto"}).` };
+    return { status: "pending" as PickStatus, reason: `Jogo ainda nao finalizado (${fixtureStatusLong(fixture) || "status aberto"}).` };
   }
 
   if (category === "mais_menos_gols") return evaluateGoals(selection, fixture);
@@ -622,32 +756,38 @@ export default async (req: Request) => {
       }, { status: 404 });
     }
 
-    const fixtureIds = [...new Set(selections.map(selectionFixtureId).filter(Boolean))];
+    const selectionKeys = [...new Set(selections
+      .map((selection) => fixtureKey(selectionSport(selection), selectionFixtureId(selection)))
+      .filter((key) => !key.endsWith(":0")))];
     let fixtureRequests = 0;
     let cachedFixtureHits = 0;
-    const fixturePairs = await Promise.all(fixtureIds.map(async (fixtureId) => {
-      const storedFixture = storedFixturesById.get(fixtureId);
+    const fixturePairs = await Promise.all(selectionKeys.map(async (key) => {
+      const [sport, rawFixtureId] = key.split(":");
+      const fixtureId = Number(rawFixtureId || 0);
+      const storedFixture = storedFixturesById.get(key);
       if (storedFixture) {
         cachedFixtureHits += 1;
-        return [fixtureId, storedFixture] as const;
+        return [key, storedFixture] as const;
       }
-      if (!allowLiveApi) return [fixtureId, null] as const;
+      if (!allowLiveApi) return [key, null] as const;
 
       try {
         fixtureRequests += 1;
+        if (sport !== "football") return [key, null] as const;
         const fixtures = await apiFootball("/fixtures", { id: fixtureId, timezone: DEFAULT_TIMEZONE });
-        return [fixtureId, fixtures[0] || null] as const;
+        return [key, fixtures[0] || null] as const;
       } catch {
-        return [fixtureId, null] as const;
+        return [key, null] as const;
       }
     }));
-    const fixturesById = new Map<number, ApiFootballFixture | null>(fixturePairs);
+    const fixturesById = new Map<string, ApiFootballFixture | null>(fixturePairs);
     const statsCache = new Map<number, any[]>();
     const items = [];
 
     for (const selection of selections) {
       const fixtureId = selectionFixtureId(selection);
-      const fixture = fixturesById.get(fixtureId);
+      const sport = selectionSport(selection);
+      const fixture = fixturesById.get(fixtureKey(sport, fixtureId));
       if (!fixture) {
         items.push({
           ...selection,
@@ -667,9 +807,10 @@ export default async (req: Request) => {
       const result = await evaluateSelection(selection, fixture, statsCache, allowLiveApi);
       items.push({
         fixtureId,
+        sport,
         game: selection.game || `${fixture.teams.home.name} x ${fixture.teams.away.name}`,
         league: selection.league || fixture.league?.name || "Competicao nao informada",
-        startsAt: selection.startsAt || fixture.fixture.date,
+        startsAt: selection.startsAt || (fixture as any)?.fixture?.date || (fixture as any)?.date,
         market: selection.market || selection.category || "--",
         selection: selectionText(selection),
         odd: Number(selection.odd || 0) || null,
