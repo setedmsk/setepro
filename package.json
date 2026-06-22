@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@netlify/blobs": "^10.7.9",
-    "openai": "^4.104.0"
+    "openai": "^4.104.0",
+    "web-push": "^3.6.7"
   }
 }

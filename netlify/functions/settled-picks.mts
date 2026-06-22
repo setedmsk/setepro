@@ -1,4 +1,5 @@
 import { getStore } from "@netlify/blobs";
+import { sendPushToAll } from "./_shared/push.mts";
 
 declare const Netlify: {
   env: {
@@ -160,6 +161,65 @@ async function saveSettlement(report: any) {
   } catch {
     // The report can still be returned even when Blob persistence is unavailable.
   }
+}
+
+async function notificationKeyForSettlement(report: any) {
+  const items = Array.isArray(report?.items) ? report.items : [];
+  const closed = items
+    .filter((item: any) => ["won", "lost", "void"].includes(String(item?.status || "")))
+    .map((item: any) => [
+      item.sport || "",
+      item.fixtureId || "",
+      item.market || "",
+      item.selection || "",
+      item.status || "",
+      item.result || "",
+    ].join("|"))
+    .sort()
+    .join(";");
+
+  if (!closed) return "";
+  const bytes = new TextEncoder().encode(`${report?.source?.date || ""}|${closed}`);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const hash = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `notifications/${SETTLEMENT_CACHE_VERSION}/${report.source.date}/${hash}.json`;
+}
+
+async function notifySettlementIfNeeded(report: any) {
+  const summary = report?.summary || {};
+  const closedCount = Number(summary.won || 0) + Number(summary.lost || 0) + Number(summary.void || 0);
+  if (!closedCount) return { sent: 0, skipped: true };
+
+  const key = await notificationKeyForSettlement(report);
+  if (!key) return { sent: 0, skipped: true };
+
+  const store = settlementStore();
+  try {
+    const alreadySent = await store.get(key, { type: "json" });
+    if (alreadySent) return { sent: 0, skipped: true, duplicate: true };
+  } catch {
+    // Missing key means this settlement has not been notified yet.
+  }
+
+  const won = Number(summary.won || 0);
+  const lost = Number(summary.lost || 0);
+  const review = Number(summary.review || 0);
+  const result = await sendPushToAll({
+    title: "Sete PRO - Acertos do dia",
+    body: `${won} bateram, ${lost} nao bateram${review ? `, ${review} para conferir` : ""}.`,
+    tag: `sete-pro-settlement-${report.source.date}`,
+    url: "/?acao=acertos",
+  });
+
+  if (!result.skipped) {
+    await store.setJSON(key, {
+      sentAt: new Date().toISOString(),
+      result,
+      summary,
+    });
+  }
+
+  return result;
 }
 
 function withSettlementSport(report: any, sport: string) {
@@ -847,6 +907,7 @@ export default async (req: Request) => {
       items,
     };
     await saveSettlement(responseBody);
+    await notifySettlementIfNeeded(responseBody);
     return json(responseBody);
   } catch (error: any) {
     return json({
