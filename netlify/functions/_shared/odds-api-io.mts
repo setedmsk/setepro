@@ -132,15 +132,15 @@ function dateWindow(date: string) {
   };
 }
 
-export async function loadSelectedBookmakers(key: string, fallback: string[]) {
+export async function loadSelectedBookmakers(key: string, fallback: string[], limit = 2) {
   try {
     const data = await oddsApiIoFetch("/bookmakers/selected", {}, key, ODDS_API_IO_PROVIDER, 7000);
     const selected = arrayFromResponse(data)
       .map((item) => String(item?.name || item?.bookmaker || item || "").trim())
       .filter(Boolean);
-    return selected.length ? selected.slice(0, 12) : fallback;
+    return selected.length ? selected.slice(0, limit) : fallback.slice(0, limit);
   } catch {
-    return fallback;
+    return fallback.slice(0, limit);
   }
 }
 

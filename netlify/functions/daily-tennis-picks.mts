@@ -23,7 +23,7 @@ const DEFAULT_STAKE = 5;
 const DEFAULT_MAX_SELECTIONS = 5;
 const TENNIS_GAME_LIMIT = 5;
 const TENNIS_CANDIDATE_LIMIT = 24;
-const BOOKMAKER_FALLBACK = ["Bet365", "Pinnacle", "Unibet", "Betfair", "1xBet", "Stake"];
+const BOOKMAKER_FALLBACK = ["Betano BR", "Superbet"];
 const KEY_NAMES = ["TENNIS_ODDS_API_KEY"];
 
 type TennisCategory = "vencedor" | "total_games" | "primeiro_set";

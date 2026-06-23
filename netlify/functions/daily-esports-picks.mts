@@ -23,7 +23,7 @@ const DEFAULT_STAKE = 5;
 const DEFAULT_MAX_SELECTIONS = 5;
 const ESPORTS_GAME_LIMIT = 5;
 const ESPORTS_CANDIDATE_LIMIT = 24;
-const BOOKMAKER_FALLBACK = ["Pinnacle", "Bet365", "Unibet", "Betfair", "1xBet", "Stake"];
+const BOOKMAKER_FALLBACK = ["Betano BR", "Superbet"];
 const KEY_NAMES = ["ESPORTS_ODDS_API_KEY"];
 
 type EsportsCategory = "vencedor" | "total_mapas";
