@@ -63,6 +63,7 @@ function sportFromProvider(provider: string) {
   const normalized = normalizeText(provider);
   if (normalized.includes("basket")) return "Basquete";
   if (normalized.includes("volley") || normalized.includes("volei")) return "Volei";
+  if (normalized.includes("tennis") || normalized.includes("tenis") || normalized.includes("atp") || normalized.includes("wta")) return "Tenis";
   if (normalized.includes("oddsapi") || normalized.includes("oddspapi") || normalized.includes("sport")) return "E-sports";
   return "Futebol";
 }
@@ -124,6 +125,8 @@ function categoryBoost(category: string, market: string) {
   if (text.includes("dupla") || text.includes("double chance")) return 7;
   if (text.includes("vencedor") || text.includes("resultado final") || text.includes("winner")) return 6;
   if (text.includes("pontos") || text.includes("points")) return 5;
+  if (text.includes("games")) return 5;
+  if (text.includes("set")) return 4;
   if (text.includes("gols") || text.includes("goals")) return 5;
   if (text.includes("ambas")) return 4;
   if (text.includes("mapas")) return 4;
@@ -223,6 +226,7 @@ async function loadSources(req: Request, date: string, stake: number, refresh: b
     { key: "football", label: "Futebol", path: "/api/daily-picks", params: footballParams },
     { key: "basketball", label: "Basquete", path: "/api/daily-basketball-picks", params: new URLSearchParams(baseParams) },
     { key: "volleyball", label: "Volei", path: "/api/daily-volleyball-picks", params: new URLSearchParams(baseParams) },
+    { key: "tennis", label: "Tenis", path: "/api/daily-tennis-picks", params: new URLSearchParams(baseParams) },
     { key: "esports", label: "E-sports", path: "/api/daily-esports-picks", params: new URLSearchParams(baseParams) },
   ];
 
@@ -249,6 +253,8 @@ function chooseMixedSelections(picks: MixedPick[], maxSelections: number, target
     basquete: 2,
     volei: 2,
     volleyball: 2,
+    tenis: 1,
+    tennis: 1,
     "e sports": 1,
     esports: 1,
   };
@@ -349,7 +355,7 @@ export default async (req: Request) => {
   const sportsUsed = [...new Set(mainSelections.map((pick) => pick.sport))];
 
   const analysis = {
-    summary: `Mix multi-esporte de ${date}: combinei futebol, basquete, volei e e-sports quando disponiveis. O foco foi odd alta por soma de selecoes simples: vencedor, gols/pontos e dupla chance quando aparece.`,
+    summary: `Mix multi-esporte de ${date}: combinei futebol, basquete, volei, tenis e e-sports quando disponiveis. O foco foi odd alta por soma de selecoes simples: vencedor, gols/pontos/games e dupla chance quando aparece.`,
     gameByGame: buildGameByGame(ranked),
     traps: warnings.map((warning) => ({
       game: "Fonte indisponivel",
@@ -373,7 +379,7 @@ export default async (req: Request) => {
       generatedAt: new Date().toISOString(),
       timezone: DEFAULT_TIMEZONE,
       schedule: "Sob demanda",
-      searchMode: "futebol + basquete + volei + e-sports",
+      searchMode: "futebol + basquete + volei + tenis + e-sports",
       gameLimit: maxSelections,
       candidateLimit: picks.length,
       gamesAnalyzed: new Set(picks.map(pickEventKey)).size,

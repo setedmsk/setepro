@@ -102,11 +102,12 @@ function overallFromRequired(apiFootball: ServiceHealth, openAi: ServiceHealth) 
 export default async () => {
   const checkedAt = new Date().toISOString();
 
-  const [latestDaily, latestDailyError, latestBasketball, latestVolleyball] = await Promise.all([
+  const [latestDaily, latestDailyError, latestBasketball, latestVolleyball, latestTennis] = await Promise.all([
     timed(() => readBlobJson("daily-picks", "latest.json")),
     timed(() => readBlobJson("daily-picks", "latest-error.json")),
     timed(() => readBlobJson("daily-basketball-picks", "latest.json")),
     timed(() => readBlobJson("daily-volleyball-picks", "latest.json")),
+    timed(() => readBlobJson("daily-tennis-picks", "latest.json")),
   ]);
 
   const apiFootball = serviceFromKeys(
@@ -142,6 +143,13 @@ export default async () => {
     true
   );
 
+  const tennisOdds = serviceFromKeys(
+    ["TENNIS_ODDS_API_KEY", "ODDSPAPI_KEY", "ODDS_PAPI_KEY"],
+    "Provider de odds para tenis configurado.",
+    "Provider de odds para tenis ausente. Necessario somente para palpites de tenis.",
+    true
+  );
+
   const blobsOk = !latestDaily.error || latestDaily.value !== null || latestDailyError.value !== null;
   const blobs: ServiceHealth = {
     status: blobsOk ? "ok" : "warning",
@@ -155,6 +163,7 @@ export default async () => {
   apiFootball.latest = reportSummary(latestDaily.value);
   apiBasketball.latest = reportSummary(latestBasketball.value);
   apiVolleyball.latest = reportSummary(latestVolleyball.value);
+  tennisOdds.latest = reportSummary(latestTennis.value);
 
   const latestPicks = Number((latestDaily.value as any)?.source?.picksFound || 0);
   const hasUsableDailyReport = latestPicks > 0;
@@ -166,6 +175,7 @@ export default async () => {
     openai: openAi,
     api_basketball: apiBasketball,
     api_volleyball: apiVolleyball,
+    tennis_odds: tennisOdds,
     esports_odds: esportsOdds,
     netlify_blobs: blobs,
   };
@@ -206,6 +216,13 @@ export default async () => {
         status: apiVolleyball.status,
         detail: apiVolleyball.detail,
         latest: apiVolleyball.latest,
+      },
+      tennisOdds: {
+        ok: tennisOdds.status === "ok",
+        optional: true,
+        status: tennisOdds.status,
+        detail: tennisOdds.detail,
+        latest: tennisOdds.latest,
       },
       esportsOdds: {
         ok: esportsOdds.status === "ok",

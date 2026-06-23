@@ -1155,6 +1155,11 @@
       background: rgba(37, 217, 255, 0.09);
     }
 
+    .sport-icon-tennis {
+      border-color: rgba(49, 247, 164, 0.28);
+      background: rgba(49, 247, 164, 0.11);
+    }
+
     .sport-icon-esports {
       border-color: rgba(168, 85, 247, 0.32);
       background: rgba(168, 85, 247, 0.12);
@@ -1558,7 +1563,7 @@
                   </svg>
                   ⚽ Hoje
                 </button>
-                <button class="btn btn-secondary" type="button" id="mixedPicksBtn" title="Bingo do 7: misturar futebol, basquete, v&ocirc;lei e e-sports em um bilhete de odd mais alta">
+                <button class="btn btn-secondary" type="button" id="mixedPicksBtn" title="Bingo do 7: misturar futebol, basquete, v&ocirc;lei, t&ecirc;nis e e-sports em um bilhete de odd mais alta">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
                     <path d="M16 3h5v5"></path>
                     <path d="M4 20l17-17"></path>
@@ -1578,6 +1583,15 @@
                     <circle cx="12" cy="12" r="2"></circle>
                   </svg>
                   🏐 Hoje
+                </button>
+                <button class="btn btn-secondary" type="button" id="tennisBtn">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                    <circle cx="12" cy="12" r="8"></circle>
+                    <path d="M5 8c4 1 9 1 14 0"></path>
+                    <path d="M5 16c4-1 9-1 14 0"></path>
+                    <path d="M12 4c-2 4-2 12 0 16"></path>
+                  </svg>
+                  &#127934; Hoje
                 </button>
                 <button class="btn btn-secondary" type="button" id="esportsBtn">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
@@ -1800,6 +1814,7 @@
     const pushAlertsBtn = document.getElementById("pushAlertsBtn");
     const pushStatusEl = document.getElementById("pushStatus");
     const combatCourtBtn = document.getElementById("combatCourtBtn");
+    const tennisBtn = document.getElementById("tennisBtn");
     const esportsBtn = document.getElementById("esportsBtn");
     const backendStatusPill = document.getElementById("backendStatusPill");
     const backendStatusText = document.getElementById("backendStatusText");
@@ -2035,6 +2050,7 @@
         ["IA de print", checks.visionAi],
         ["Basquete", checks.basketball],
         ["Volei", checks.volleyball],
+        ["Tenis", checks.tennisOdds],
         ["E-sports", checks.esportsOdds],
         ["Cache interno", checks.blobs],
         ["Palpites sob demanda", checks.dailyReport]
@@ -2429,6 +2445,9 @@
       }
       if (text.includes("volley") || text.includes("volei") || text.includes("voleibol")) {
         return { icon: "🏐", label: "Volei", className: "volleyball" };
+      }
+      if (text.includes("tennis") || text.includes("tenis") || text.includes("atp") || text.includes("wta")) {
+        return { icon: "&#127934;", label: "Tenis", className: "tennis" };
       }
       if (text.includes("futebol") || text.includes("football") || text.includes("soccer") || text.includes("api football")) {
         return { icon: "⚽", label: "Futebol", className: "football" };
@@ -3949,11 +3968,47 @@
       }
     }
 
+    async function runTennisPicks(triggerButton = tennisBtn) {
+      const originalHtml = triggerButton.innerHTML;
+      triggerButton.disabled = true;
+      triggerButton.textContent = "Buscando tenis...";
+      outputEl.innerHTML = "<div class=\"empty-state\"><div><strong>Buscando palpites de t&ecirc;nis</strong><span>Consultando OddsPapi e filtrando vencedor, total de games e 1&ordm; set.</span></div></div>";
+
+      try {
+        const params = new URLSearchParams({
+          date: analysisDateInput.value || todayInSaoPaulo(),
+          stake: String(Number(stakeInput.value || 5)),
+          maxSelections: String(Number(maxSelectionsInput.value || 5))
+        });
+        const response = await fetch("/api/daily-tennis-picks?" + params.toString());
+        const data = await response.json();
+
+        if (!response.ok) {
+          renderSetupError(data);
+          return;
+        }
+
+        renderRemoteAnalysis(data);
+      } catch (error) {
+        renderSetupError({
+          error: "Nao consegui carregar os palpites de Tenis.",
+          setup: [
+            "Confirme que a Function /api/daily-tennis-picks foi publicada.",
+            "Configure ODDSPAPI_KEY ou ODDS_PAPI_KEY no Netlify.",
+            "Confirme que sua conta OddsPapi libera odds de tenis."
+          ]
+        });
+      } finally {
+        triggerButton.disabled = false;
+        triggerButton.innerHTML = originalHtml;
+      }
+    }
+
     async function runMixedPicks(triggerButton = mixedPicksBtn) {
       const originalHtml = triggerButton.innerHTML;
       triggerButton.disabled = true;
       triggerButton.textContent = "Montando mix...";
-      outputEl.innerHTML = "<div class=\"empty-state\"><div><strong>Montando Bingo do 7</strong><span>Juntando futebol, basquete, v&ocirc;lei e e-sports com mercados simples e odds altas.</span></div></div>";
+      outputEl.innerHTML = "<div class=\"empty-state\"><div><strong>Montando Bingo do 7</strong><span>Juntando futebol, basquete, v&ocirc;lei, t&ecirc;nis e e-sports com mercados simples e odds altas.</span></div></div>";
 
       try {
         const params = new URLSearchParams({
@@ -3975,8 +4030,8 @@
           error: "Nao consegui montar o mix multi-esporte.",
           setup: [
             "Confirme que a Function /api/daily-mixed-picks foi publicada.",
-            "Teste os botoes individuais de futebol, basquete e volei.",
-            "Se a OddsPapi estiver sem cota, o mix deve continuar sem e-sports."
+            "Teste os botoes individuais de futebol, basquete, volei e tenis.",
+            "Se a OddsPapi estiver sem cota, o mix deve continuar sem tenis/e-sports."
           ]
         });
       } finally {
@@ -4353,6 +4408,11 @@
 
     combatCourtBtn.addEventListener("click", () => {
       runCombatCourtPicks();
+      saveState();
+    });
+
+    tennisBtn.addEventListener("click", () => {
+      runTennisPicks();
       saveState();
     });
 
