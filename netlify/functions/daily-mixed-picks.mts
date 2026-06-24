@@ -226,8 +226,6 @@ async function loadSources(req: Request, date: string, stake: number, refresh: b
     { key: "football", label: "Futebol", path: "/api/daily-picks", params: footballParams },
     { key: "basketball", label: "Basquete", path: "/api/daily-basketball-picks", params: new URLSearchParams(baseParams) },
     { key: "volleyball", label: "Volei", path: "/api/daily-volleyball-picks", params: new URLSearchParams(baseParams) },
-    { key: "tennis", label: "Tenis", path: "/api/daily-tennis-picks", params: new URLSearchParams(baseParams) },
-    { key: "esports", label: "E-sports", path: "/api/daily-esports-picks", params: new URLSearchParams(baseParams) },
   ];
 
   const results = await Promise.all(sources.map(async (source) => {
@@ -253,10 +251,6 @@ function chooseMixedSelections(picks: MixedPick[], maxSelections: number, target
     basquete: 2,
     volei: 2,
     volleyball: 2,
-    tenis: 1,
-    tennis: 1,
-    "e sports": 1,
-    esports: 1,
   };
   const selected: MixedPick[] = [];
   const usedEvents = new Set<string>();
@@ -342,7 +336,7 @@ export default async (req: Request) => {
       detail: warnings.length ? warnings.join(" | ") : "As fontes responderam sem picks aproveitaveis.",
       setup: [
         "Tente futebol, basquete ou volei individual para ver qual fonte tem dados hoje.",
-        "Se tenis/e-sports falhar com 429, a Odds-API.io atingiu o limite de requests.",
+        "O Bingo do 7 agora ignora tenis e e-sports para manter o mix mais consistente.",
       ],
     }, { status: 502 });
   }
@@ -355,7 +349,7 @@ export default async (req: Request) => {
   const sportsUsed = [...new Set(mainSelections.map((pick) => pick.sport))];
 
   const analysis = {
-    summary: `Mix multi-esporte de ${date}: combinei futebol, basquete, volei, tenis e e-sports quando disponiveis. O foco foi odd alta por soma de selecoes simples: vencedor, gols/pontos/games e dupla chance quando aparece.`,
+    summary: `Mix multi-esporte de ${date}: combinei futebol, basquete e volei quando disponiveis. O foco foi odd alta por soma de selecoes simples: vencedor, gols/pontos e dupla chance quando aparece.`,
     gameByGame: buildGameByGame(ranked),
     traps: warnings.map((warning) => ({
       game: "Fonte indisponivel",
@@ -379,7 +373,7 @@ export default async (req: Request) => {
       generatedAt: new Date().toISOString(),
       timezone: DEFAULT_TIMEZONE,
       schedule: "Sob demanda",
-      searchMode: "futebol + basquete + volei + tenis + e-sports",
+      searchMode: "futebol + basquete + volei",
       gameLimit: maxSelections,
       candidateLimit: picks.length,
       gamesAnalyzed: new Set(picks.map(pickEventKey)).size,
