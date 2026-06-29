@@ -969,6 +969,15 @@
       font-weight: 900;
     }
 
+    .game-item-time {
+      display: inline-block;
+      margin-left: 7px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
     .game-meta {
       display: grid;
       grid-template-columns: 1fr auto;
@@ -1166,8 +1175,20 @@
     }
 
     .sport-game-name {
+      display: block;
       min-width: 0;
-      overflow-wrap: anywhere;
+      overflow-wrap: break-word;
+      word-break: normal;
+    }
+
+    .sport-game-time {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 800;
+      line-height: 1.25;
+      white-space: nowrap;
     }
 
     .warning-list {
@@ -1323,6 +1344,33 @@
       background: rgba(255, 99, 114, 0.14);
       color: #ffb5bd;
       border-color: rgba(255, 99, 114, 0.28);
+    }
+
+    @media (max-width: 520px) {
+      .analysis-table th,
+      .analysis-table td {
+        padding: 8px 6px;
+      }
+
+      .sport-game {
+        grid-template-columns: 18px minmax(0, 1fr);
+        gap: 5px;
+      }
+
+      .sport-icon {
+        width: 18px;
+        height: 18px;
+        font-size: 11px;
+      }
+
+      .sport-game-name {
+        font-size: 11px;
+        line-height: 1.25;
+      }
+
+      .sport-game-time {
+        font-size: 9.5px;
+      }
     }
 
     @media (min-width: 620px) {
@@ -2037,6 +2085,70 @@
       }).format(date);
     }
 
+    function parseGameDateTime(value) {
+      if (!value) return null;
+      if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+
+      const raw = String(value).trim();
+      if (!raw) return null;
+
+      const brMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:,?\s+(\d{1,2}):(\d{2}))?/);
+      if (brMatch) {
+        const year = brMatch[3].length === 2 ? "20" + brMatch[3] : brMatch[3];
+        const hour = brMatch[4] || "00";
+        const minute = brMatch[5] || "00";
+        const parsed = new Date(`${year}-${brMatch[2].padStart(2, "0")}-${brMatch[1].padStart(2, "0")}T${hour.padStart(2, "0")}:${minute}:00-03:00`);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+      }
+
+      const timeOnly = raw.match(/^(\d{1,2}):(\d{2})$/);
+      if (timeOnly) {
+        const parsed = new Date(`${todayInSaoPaulo()}T${timeOnly[1].padStart(2, "0")}:${timeOnly[2]}:00-03:00`);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+      }
+
+      const parsed = new Date(raw);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    function gameDateKey(date) {
+      return new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Sao_Paulo",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+      }).format(date);
+    }
+
+    function formatGameStartTime(selection) {
+      const raw = selection && (
+        selection.startsAt ||
+        selection.startAt ||
+        selection.startTime ||
+        selection.kickoff ||
+        selection.dateTime ||
+        selection.date ||
+        selection.time
+      );
+      const date = parseGameDateTime(raw);
+      if (!date) return "";
+
+      const time = new Intl.DateTimeFormat("pt-BR", {
+        timeZone: "America/Sao_Paulo",
+        hour: "2-digit",
+        minute: "2-digit"
+      }).format(date);
+      const dateKey = gameDateKey(date);
+      if (dateKey === todayInSaoPaulo()) return "Hoje " + time;
+
+      const day = new Intl.DateTimeFormat("pt-BR", {
+        timeZone: "America/Sao_Paulo",
+        day: "2-digit",
+        month: "2-digit"
+      }).format(date);
+      return day + " " + time;
+    }
+
     function renderHealthCard(health) {
       if (!health) {
         return "<article class=\"analysis-card\" data-tone=\"alto\"><header><h3>Status do backend</h3><span class=\"tag\">Offline</span></header><div class=\"content\"><p>Nao consegui consultar /api/health.</p></div></article>";
@@ -2462,10 +2574,14 @@
       const repaired = repairRemoteSelection(selection || {});
       const game = formatGameName(repaired);
       const sport = selectionSportMeta(repaired);
+      const startTime = formatGameStartTime(repaired);
       return [
         "<span class=\"sport-game\" title=\"" + escapeHtml(sport.label) + "\">",
         "<span class=\"sport-icon sport-icon-" + escapeHtml(sport.className) + "\" aria-hidden=\"true\">" + sport.icon + "</span>",
+        "<span>",
         "<span class=\"sport-game-name\">" + escapeHtml(game) + "</span>",
+        startTime ? "<span class=\"sport-game-time\">" + escapeHtml(startTime) + "</span>" : "",
+        "</span>",
         "</span>"
       ].join("");
     }
@@ -3233,6 +3349,7 @@
 
       return "<div class=\"game-analysis\">" + items.map((item, index) => {
         const game = formatGameName(item);
+        const startTime = formatGameStartTime(item);
         const market = item.bestMarket || item.market || item.recommendedMarket || "";
         const reason = formatDisplayText(item.reason || item.analysis || item.context || item.status || "");
         const picks = Array.isArray(item.picks)
@@ -3252,7 +3369,7 @@
 
         return [
           "<div class=\"game-item\">",
-          "<h4>" + escapeHtml(String(index + 1) + ". " + game) + "</h4>",
+          "<h4>" + escapeHtml(String(index + 1) + ". " + game) + (startTime ? "<span class=\"game-item-time\">" + escapeHtml(startTime) + "</span>" : "") + "</h4>",
           market ? "<div class=\"game-meta\"><span>" + escapeHtml(formatMarketName(market)) + "</span><strong class=\"decision keep\">Analisado</strong></div>" : "",
           reason ? "<p>" + escapeHtml(reason) + "</p>" : "",
           picksText,
@@ -3507,7 +3624,7 @@
         const pick = formatSelectionName(item.selection || "--", rawMarket);
         const odd = item.odd ? formatOdd(Number(item.odd)) : "--";
         const confidence = item.confidence !== undefined ? Math.round(Number(item.confidence) * 100) + "%" : "--";
-        return "<tr><td>" + escapeHtml(game) + original + "</td><td>" + escapeHtml(market + " - " + pick) + "</td><td>" + escapeHtml(odd) + "</td><td>" + escapeHtml(confidence) + "</td></tr>";
+        return "<tr><td>" + renderGameCell({ ...item, game }) + original + "</td><td>" + escapeHtml(market + " - " + pick) + "</td><td>" + escapeHtml(odd) + "</td><td>" + escapeHtml(confidence) + "</td></tr>";
       }).join("");
 
       return [
@@ -3656,7 +3773,7 @@
         const rowClass = "settlement-row " + settlementStatusClass(status) + "-row";
         return [
           "<tr class=\"" + escapeHtml(rowClass) + "\">",
-          "<td><strong>" + escapeHtml(item.game || "--") + "</strong><br><span class=\"muted\">" + escapeHtml((item.sourceLabel || "Palpite") + source) + "</span></td>",
+          "<td>" + renderGameCell(item) + "<br><span class=\"muted\">" + escapeHtml((item.sourceLabel || "Palpite") + source) + "</span></td>",
           "<td>" + escapeHtml(formatMarketName(market)) + "<br><span class=\"muted\">" + escapeHtml(formatSelectionName(selection, market)) + "</span></td>",
           "<td>" + escapeHtml(item.result || "--") + "</td>",
           "<td>" + escapeHtml(odd) + "</td>",
