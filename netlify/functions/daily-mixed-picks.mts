@@ -211,6 +211,35 @@ async function fetchJson(req: Request, path: string, params: URLSearchParams) {
   };
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function sourceErrorText(result: any) {
+  return normalizeText(`${result?.data?.detail || ""} ${result?.data?.error || ""} ${result?.status || ""}`);
+}
+
+function canRetrySource(result: any) {
+  if (result.ok) return false;
+  const text = sourceErrorText(result);
+  const hardFailure = [
+    "429",
+    "request limit",
+    "rate limit",
+    "quota",
+    "limite",
+    "api key",
+    "ausente",
+    "suspenso",
+  ].some((fragment) => text.includes(fragment));
+  if (hardFailure) return false;
+  return result.status === 0 || result.status >= 500 || text.includes("vazio") || text.includes("sem picks");
+}
+
+function hasUsableReportPicks(report: any) {
+  return collectReportPicks(report).length > 0;
+}
+
 async function loadSources(req: Request, date: string, stake: number, refresh: boolean) {
   const baseParams = new URLSearchParams({
     date,
@@ -228,7 +257,7 @@ async function loadSources(req: Request, date: string, stake: number, refresh: b
     { key: "volleyball", label: "Volei", path: "/api/daily-volleyball-picks", params: new URLSearchParams(baseParams) },
   ];
 
-  const results = await Promise.all(sources.map(async (source) => {
+  async function callSource(source: typeof sources[number]) {
     try {
       const result = await fetchJson(req, source.path, source.params);
       return { source, ...result };
@@ -240,18 +269,39 @@ async function loadSources(req: Request, date: string, stake: number, refresh: b
         data: { error: "Falha ao chamar fonte", detail: error?.message || String(error || "") },
       };
     }
-  }));
+  }
+
+  const results = await Promise.all(sources.map(callSource));
+
+  for (let index = 0; index < results.length; index += 1) {
+    const result = results[index];
+    if (!canRetrySource(result)) continue;
+
+    await sleep(450);
+    const retry = await callSource(result.source);
+    if (retry.ok && hasUsableReportPicks(retry.data)) {
+      results[index] = retry;
+      continue;
+    }
+
+    if (result.source.key === "football" && result.source.params.has("markets")) {
+      const fallbackSource = {
+        ...result.source,
+        params: new URLSearchParams(result.source.params),
+      };
+      fallbackSource.params.delete("markets");
+      const fallback = await callSource(fallbackSource);
+      if (fallback.ok && hasUsableReportPicks(fallback.data)) {
+        results[index] = fallback;
+        continue;
+      }
+    }
+  }
 
   return results;
 }
 
 function chooseMixedSelections(picks: MixedPick[], maxSelections: number, targetOdd: number) {
-  const sportLimits: Record<string, number> = {
-    futebol: 3,
-    basquete: 2,
-    volei: 2,
-    volleyball: 2,
-  };
   const selected: MixedPick[] = [];
   const usedEvents = new Set<string>();
   const sportCounts = new Map<string, number>();
@@ -261,6 +311,20 @@ function chooseMixedSelections(picks: MixedPick[], maxSelections: number, target
     .sort((a, b) => mixedScore(b, targetOdd) - mixedScore(a, targetOdd));
 
   const availableSports = [...new Set(ranked.map(pickSportKey))];
+  const sportLimit = (sport: string) => {
+    if (availableSports.length <= 1) return maxSelections;
+    if (availableSports.length === 2) {
+      if (sport === "futebol") return 4;
+      if (sport === "basquete") return 3;
+      if (sport === "volei" || sport === "volleyball") return 3;
+      return 3;
+    }
+    if (sport === "futebol") return 3;
+    if (sport === "basquete") return 2;
+    if (sport === "volei" || sport === "volleyball") return 2;
+    return 2;
+  };
+
   for (const sport of availableSports) {
     if (selected.length >= maxSelections) break;
     const pick = ranked.find((item) => pickSportKey(item) === sport && !usedEvents.has(pickEventKey(item)));
@@ -275,8 +339,7 @@ function chooseMixedSelections(picks: MixedPick[], maxSelections: number, target
     const eventKey = pickEventKey(pick);
     if (usedEvents.has(eventKey)) continue;
     const sport = pickSportKey(pick);
-    const limit = sportLimits[sport] || 2;
-    if ((sportCounts.get(sport) || 0) >= limit) continue;
+    if ((sportCounts.get(sport) || 0) >= sportLimit(sport)) continue;
     selected.push(pick);
     usedEvents.add(eventKey);
     sportCounts.set(sport, (sportCounts.get(sport) || 0) + 1);
