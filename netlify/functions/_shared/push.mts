@@ -129,3 +129,20 @@ export async function sendPushToAll(payload: PushPayload) {
 
   return { sent, failed, skipped: false };
 }
+
+export async function sendPushToSubscription(
+  subscription: PushSubscriptionLike,
+  payload: PushPayload
+) {
+  if (!isValidSubscription(subscription)) {
+    throw new Error("Inscricao push invalida.");
+  }
+
+  const config = configureWebPush();
+  if (!config.configured) {
+    return { sent: 0, failed: 0, skipped: true, reason: "VAPID ausente" };
+  }
+
+  await webpush.sendNotification(subscription, JSON.stringify(payload));
+  return { sent: 1, failed: 0, skipped: false };
+}

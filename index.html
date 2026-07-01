@@ -4419,7 +4419,11 @@
           throw new Error(errorData.detail || "Nao consegui salvar este aparelho.");
         }
 
-        await fetch("/api/push-test", { method: "POST" }).catch(() => null);
+        await fetch("/api/push-test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ subscription })
+        }).catch(() => null);
         triggerButton.innerHTML = originalHtml;
         triggerButton.querySelector(".btn-label").textContent = "Alertas ativos";
         setPushStatus("Alertas ativos. Enviamos um teste para este aparelho.");

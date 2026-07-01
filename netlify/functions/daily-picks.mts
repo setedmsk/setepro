@@ -1,6 +1,7 @@
 import { getStore } from "@netlify/blobs";
 import OpenAI from "openai";
 import { externalServiceError, fetchWithTimeout, friendlyErrorPayload, missingConfig } from "./_shared/http.mts";
+import { isUpcomingStart, pruneUpcomingReport } from "./_shared/upcoming.mts";
 
 declare const Netlify: {
   env: {
@@ -722,7 +723,8 @@ function leaguePriority(fixture: ApiFootballFixture) {
 
 function isUsableFixture(fixture: ApiFootballFixture) {
   const status = fixture.fixture.status?.short || "";
-  return !["CANC", "PST", "ABD", "AWD", "WO"].includes(status);
+  const pregame = !status || ["NS", "TBD"].includes(status);
+  return pregame && isUpcomingStart(fixture.fixture.date);
 }
 
 async function mapLimit<T, R>(items: T[], limit: number, mapper: (item: T) => Promise<R>) {
@@ -1275,7 +1277,8 @@ function isUsableReport(report: DailyReport | null) {
 async function readCachedReport(date: string, scope: DailyScope, requestedMarkets: MarketCategory[]) {
   try {
     const report = await dailyStore().get(reportCacheKey(date, scope, requestedMarkets), { type: "json" }) as DailyReport | null;
-    return isUsableReport(report) ? report : null;
+    const upcoming = pruneUpcomingReport(report, DEFAULT_STAKE);
+    return isUsableReport(upcoming) ? upcoming : null;
   } catch {
     return null;
   }

@@ -1,5 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import { friendlyErrorPayload } from "./_shared/http.mts";
+import { isUpcomingStart, pruneUpcomingReport } from "./_shared/upcoming.mts";
 import {
   ODDS_API_IO_PROVIDER,
   eventId,
@@ -258,7 +259,7 @@ async function collectEsportsPicks(date: string) {
   const errors: string[] = [];
 
   const events = (await loadEventsForSport(key, "esports", date, ESPORTS_CANDIDATE_LIMIT))
-    .filter(isPregameOrLive)
+    .filter((event) => isPregameOrLive(event) && isUpcomingStart(eventStart(event)))
     .filter((event) => isAllowedLocalDate(event, allowedDates))
     .sort((a, b) => eventStart(a).localeCompare(eventStart(b)));
   const bookmakers = await loadSelectedBookmakers(key, BOOKMAKER_FALLBACK);
@@ -406,7 +407,8 @@ function isUsableReport(report: EsportsReport | null) {
 async function readCachedReport(date: string) {
   try {
     const report = await reportStore().get(`reports/${date}.json`, { type: "json" }) as EsportsReport | null;
-    return isUsableReport(report) ? report : null;
+    const upcoming = pruneUpcomingReport(report, DEFAULT_STAKE);
+    return isUsableReport(upcoming) ? upcoming : null;
   } catch {
     return null;
   }

@@ -1,5 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import { externalServiceError, fetchWithTimeout, friendlyErrorPayload } from "./_shared/http.mts";
+import { isUpcomingStart, pruneUpcomingReport } from "./_shared/upcoming.mts";
 
 declare const Netlify: {
   env: {
@@ -197,7 +198,8 @@ function gameName(game: BasketballGame) {
 
 function isPreGame(game: BasketballGame) {
   const status = normalizeText(String(game.status?.short || game.status?.long || ""));
-  return !status || ["ns", "not started", "scheduled", "tbd"].some((item) => status.includes(item));
+  const pregame = !status || ["ns", "not started", "scheduled", "tbd"].some((item) => status.includes(item));
+  return pregame && isUpcomingStart(game.date);
 }
 
 function leaguePriority(game: BasketballGame) {
@@ -622,7 +624,8 @@ function isUsableReport(report: BasketballReport | null) {
 async function readCachedReport(date: string) {
   try {
     const report = await basketballStore().get(`reports/${date}.json`, { type: "json" }) as BasketballReport | null;
-    return isUsableReport(report) ? report : null;
+    const upcoming = pruneUpcomingReport(report, DEFAULT_STAKE);
+    return isUsableReport(upcoming) ? upcoming : null;
   } catch {
     return null;
   }
