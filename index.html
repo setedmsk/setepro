@@ -3558,6 +3558,15 @@
         [/\bBalanced\b/gi, "Equilibrado"],
         [/\bConservative\b/gi, "Conservador"],
         [/\bBold\b/gi, "Ousado"],
+        [/\bGame Finished\b/gi, "Finalizado"],
+        [/\bMatch Finished\b/gi, "Finalizado"],
+        [/\bNot Started\b/gi, "N\u00e3o iniciado"],
+        [/\bScheduled\b/gi, "Agendado"],
+        [/\bPostponed\b/gi, "Adiado"],
+        [/\bCancelled\b/gi, "Cancelado"],
+        [/\bCanceled\b/gi, "Cancelado"],
+        [/\bFinished\b/gi, "Finalizado"],
+        [/\bStarted\b/gi, "Iniciado"],
       ];
 
       replacements.forEach(([pattern, replacement]) => {
@@ -3600,7 +3609,16 @@
       if (source.fixturesFound !== undefined) details.push("Fixtures: " + source.fixturesFound);
       if (source.mode) details.push("Modo: " + source.mode);
       if (source.cachedFixtureHits !== undefined) details.push("Fixtures salvos: " + source.cachedFixtureHits);
+      if (source.liveFixtureHits !== undefined) details.push("Placares atualizados: " + source.liveFixtureHits);
+      if (source.fallbackFixtureHits !== undefined && source.fallbackFixtureHits > 0) details.push("Sem atualiza\u00e7\u00e3o: " + source.fallbackFixtureHits);
       if (source.fixtureRequests !== undefined) details.push("Chamadas fixtures: " + source.fixtureRequests);
+      if (source.fixtureRequestsBySport && typeof source.fixtureRequestsBySport === "object") {
+        const requests = Object.entries(source.fixtureRequestsBySport)
+          .filter(([, count]) => Number(count) > 0)
+          .map(([sport, count]) => selectionSportMeta({ sport }).label + ": " + count);
+        if (requests.length) details.push("Consultas por esporte: " + requests.join(", "));
+      }
+      if (Array.isArray(source.warnings) && source.warnings.length) details.push("Avisos de provedor: " + source.warnings.length);
       if (source.oddsRequests !== undefined) details.push("Chamadas odds: " + source.oddsRequests);
       if (source.usedTeamSearchFallback) details.push("Busca por times: usada");
       if (source.gamesAnalyzed !== undefined) details.push("Jogos analisados: " + source.gamesAnalyzed);
@@ -3775,9 +3793,9 @@
           "<tr class=\"" + escapeHtml(rowClass) + "\">",
           "<td>" + renderGameCell(item) + "<br><span class=\"muted\">" + escapeHtml((item.sourceLabel || "Palpite") + source) + "</span></td>",
           "<td>" + escapeHtml(formatMarketName(market)) + "<br><span class=\"muted\">" + escapeHtml(formatSelectionName(selection, market)) + "</span></td>",
-          "<td>" + escapeHtml(item.result || "--") + "</td>",
+          "<td>" + escapeHtml(formatDisplayText(item.result || "--")) + "</td>",
           "<td>" + escapeHtml(odd) + "</td>",
-          "<td><span class=\"settlement-pill " + settlementStatusClass(status) + "\">" + escapeHtml(label) + "</span><br><span class=\"muted\">" + escapeHtml(formatDisplayText(item.reason || "")) + "</span></td>",
+          "<td><span class=\"settlement-pill " + settlementStatusClass(status) + "\">" + escapeHtml(formatDisplayText(label)) + "</span><br><span class=\"muted\">" + escapeHtml(formatDisplayText(item.reason || "")) + "</span></td>",
           "</tr>"
         ].join("");
       }).join("");
@@ -3796,6 +3814,7 @@
       const checked = Number(source.picksChecked || items.length || 0);
       const tone = settlementTone(summary);
       const offlinePending = String(source.mode || "").toLowerCase().includes("economico") && pending > 0 && won === 0 && lost === 0;
+      const refreshedPending = String(source.mode || "").toLowerCase().includes("atualizacao") && pending > 0;
 
       totalOddEl.textContent = "--";
       possibleReturnEl.textContent = "--";
@@ -3823,6 +3842,7 @@
         "</tbody></table></div>",
         "</article>",
         offlinePending ? "<article class=\"analysis-card\" data-tone=\"medio\"><header><h3>Aguardando placar salvo</h3><span class=\"tag\">Cache</span></header><div class=\"content\"><p>Estou em modo econ&ocirc;mico, sem chamadas externas. Quando o placar final ainda n&atilde;o estiver salvo no relat&oacute;rio, deixo como <strong>Pendente</strong> em vez de gastar API ou cravar errado.</p></div></article>" : "",
+        refreshedPending ? "<article class=\"analysis-card\" data-tone=\"medio\"><header><h3>Alguns resultados ainda est&atilde;o pendentes</h3><span class=\"tag\">API</span></header><div class=\"content\"><p>As APIs foram consultadas agora. Os itens pendentes ainda n&atilde;o vieram como finalizados ou o provedor n&atilde;o devolveu um placar atualizado.</p></div></article>" : "",
         review ? "<article class=\"analysis-card\" data-tone=\"alto\"><header><h3>O que precisa conferir</h3><span class=\"tag\">Manual</span></header><div class=\"content\"><p>Mercados como escanteios, cart&otilde;es e chutes dependem de estat&iacute;sticas que nem sempre a API entrega no p&oacute;s-jogo. Quando isso acontecer, o app deixa em <strong>Conferir</strong> em vez de cravar errado.</p></div></article>" : ""
       ].join("");
       appendHistorySnapshot(source.date || analysisDateInput.value || todayInSaoPaulo());
@@ -3946,12 +3966,13 @@
     async function runSettledPicks(triggerButton = settledPicksBtn) {
       const originalHtml = triggerButton.innerHTML;
       triggerButton.disabled = true;
-      triggerButton.textContent = "Fechando...";
-      outputEl.innerHTML = "<div class=\"empty-state\"><div><strong>Fechando acertos do dia</strong><span>Usando os palpites e placares que ja estao salvos, sem gastar API.</span></div></div>";
+      triggerButton.textContent = "Atualizando...";
+      outputEl.innerHTML = "<div class=\"empty-state\"><div><strong>Atualizando acertos do dia</strong><span>Consultando os placares de futebol, basquete e v&ocirc;lei em chamadas agrupadas.</span></div></div>";
 
       try {
         const params = new URLSearchParams({
-          date: "auto"
+          date: "auto",
+          refresh: "1"
         });
         const response = await fetch("/api/settled-picks?" + params.toString());
         const data = await response.json();
@@ -3967,8 +3988,8 @@
           error: "Nao consegui carregar o relatorio de acertos.",
           setup: [
             "Confirme que a Function /api/settled-picks foi publicada.",
-            "Gere primeiro algum palpite de futebol no dia.",
-            "Se o placar ainda nao estiver salvo, gere um novo palpite ou atualize manualmente depois."
+            "Gere primeiro algum palpite de futebol, basquete ou v\u00f4lei no dia.",
+            "Confira se as chaves esportivas ainda possuem quota para consultar os placares."
           ]
         });
       } finally {

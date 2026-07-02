@@ -9,10 +9,12 @@ declare const Netlify: {
 };
 
 const API_FOOTBALL_BASE = "https://v3.football.api-sports.io";
+const API_BASKETBALL_BASE = "https://v1.basketball.api-sports.io";
+const API_VOLLEYBALL_BASE = "https://v1.volleyball.api-sports.io";
 const DEFAULT_TIMEZONE = "America/Sao_Paulo";
-const REPORT_CACHE_VERSION = "manual-br-v1";
+const FOOTBALL_CACHE_VERSIONS = ["manual-br-v2", "manual-br-v1"];
 const VOLLEYBALL_CACHE_VERSION = "volley-points-v2";
-const SETTLEMENT_CACHE_VERSION = "multi-sport-v1";
+const SETTLEMENT_CACHE_VERSION = "multi-sport-v2";
 
 type ApiFootballFixture = {
   fixture: {
@@ -122,6 +124,62 @@ async function apiFootball(path: string, params: Record<string, string | number 
   return data.response || [];
 }
 
+const RESULT_APIS = {
+  basketball: {
+    label: "API-Basketball",
+    baseUrl: API_BASKETBALL_BASE,
+    envKeys: ["API_BASKETBALL_KEY", "API_SPORTS_KEY", "API_FOOTBALL_KEY"],
+  },
+  volleyball: {
+    label: "API-Volleyball",
+    baseUrl: API_VOLLEYBALL_BASE,
+    envKeys: ["API_VOLLEYBALL_KEY", "API_SPORTS_KEY", "API_FOOTBALL_KEY"],
+  },
+} as const;
+
+type ResultApiSport = keyof typeof RESULT_APIS;
+
+function resultApiKey(sport: ResultApiSport) {
+  return RESULT_APIS[sport].envKeys.map(getEnv).find(Boolean) || "";
+}
+
+async function apiSportGames(
+  sport: ResultApiSport,
+  params: Record<string, string | number | undefined>
+) {
+  const config = RESULT_APIS[sport];
+  const key = resultApiKey(sport);
+  if (!key) throw missingConfig(config.envKeys[0], config.label);
+
+  const url = new URL("/games", config.baseUrl);
+  Object.entries(params).forEach(([name, value]) => {
+    if (value !== undefined && value !== "") url.searchParams.set(name, String(value));
+  });
+
+  const response = await fetchWithTimeout(url, {
+    headers: {
+      "x-apisports-key": key,
+    },
+  }, 8000, config.label);
+
+  if (!response.ok) {
+    throw externalServiceError(config.label, `HTTP ${response.status} em /games`, response.status === 429 ? 429 : 502);
+  }
+
+  const data = await response.json();
+  const apiErrors = Array.isArray(data.errors)
+    ? data.errors.filter(Boolean)
+    : data.errors && typeof data.errors === "object"
+      ? Object.values(data.errors).flat().filter(Boolean)
+      : [];
+  if (apiErrors.length) {
+    const detail = apiErrors.join(" | ");
+    throw externalServiceError(config.label, detail, /quota|rate|limit|too many/i.test(detail) ? 429 : 502);
+  }
+
+  return data.response || [];
+}
+
 function dailyStore() {
   return getStore({ name: "daily-picks", consistency: "strong" });
 }
@@ -141,6 +199,12 @@ function settlementStore() {
 function isUsefulSettlement(report: any) {
   const items = Array.isArray(report?.items) ? report.items : [];
   return Boolean(report?.source?.date && items.length);
+}
+
+function isFuturePendingItem(item: any) {
+  if (String(item?.status || "") !== "pending") return false;
+  const startsAt = new Date(String(item?.startsAt || "")).getTime();
+  return Number.isFinite(startsAt) && startsAt > Date.now();
 }
 
 async function readCachedSettlement(date: string) {
@@ -239,24 +303,34 @@ async function readFootballReportsForDate(date: string) {
   const store = dailyStore();
   const reports: any[] = [];
   const seen = new Set<string>();
-  const prefix = `reports/${REPORT_CACHE_VERSION}/${date}/`;
 
-  try {
-    const listed = await store.list({ prefix });
-    for (const blob of listed.blobs || []) {
-      const key = blob.key;
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      const report = await store.get(key, { type: "json" });
-      if (report) reports.push(withSettlementSport(report, "football"));
+  for (const version of FOOTBALL_CACHE_VERSIONS) {
+    const prefix = `reports/${version}/${date}/`;
+    const countBefore = reports.length;
+
+    try {
+      const listed = await store.list({ prefix });
+      for (const blob of listed.blobs || []) {
+        const key = blob.key;
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        const report = await store.get(key, { type: "json" });
+        if (report) reports.push(withSettlementSport(report, "football"));
+      }
+    } catch {
+      // Local/dev stores may not support listing; latest.json below is the fallback.
     }
-  } catch {
-    // Local/dev stores may not support listing; latest.json below is the fallback.
+
+    if (reports.length > countBefore) break;
   }
 
   try {
     const latest = await store.get("latest.json", { type: "json" }) as any;
-    if (latest?.source?.date === date && !seen.has("latest.json")) {
+    const duplicate = reports.some((report) => (
+      String(report?.source?.generatedAt || "") === String(latest?.source?.generatedAt || "") &&
+      String(report?.source?.provider || "") === String(latest?.source?.provider || "")
+    ));
+    if (latest?.source?.date === date && !duplicate) {
       reports.push(withSettlementSport(latest, "football"));
     }
   } catch {
@@ -306,16 +380,17 @@ async function readReportsForDate(date: string) {
 async function listReportDates() {
   const store = dailyStore();
   const dates = new Set<string>();
-  const prefix = `reports/${REPORT_CACHE_VERSION}/`;
 
-  try {
-    const listed = await store.list({ prefix });
-    for (const blob of listed.blobs || []) {
-      const match = String(blob.key || "").match(/^reports\/[^/]+\/(\d{4}-\d{2}-\d{2})\//);
-      if (match) dates.add(match[1]);
+  for (const version of FOOTBALL_CACHE_VERSIONS) {
+    try {
+      const listed = await store.list({ prefix: `reports/${version}/` });
+      for (const blob of listed.blobs || []) {
+        const match = String(blob.key || "").match(/^reports\/[^/]+\/(\d{4}-\d{2}-\d{2})\//);
+        if (match) dates.add(match[1]);
+      }
+    } catch {
+      // Listing can be unavailable in local/dev stores; latest.json below is the fallback.
     }
-  } catch {
-    // Listing can be unavailable in local/dev stores; latest.json below is the fallback.
   }
 
   try {
@@ -368,7 +443,8 @@ async function resolveReportDate(requestedDate: string | null) {
   const yesterday = addDays(today, -1);
   const dates = await listReportDates();
 
-  if (dates.length) return dates[0];
+  if (dates.includes(yesterday)) return yesterday;
+  if (dates.includes(today)) return today;
   return dates[0] || yesterday;
 }
 
@@ -512,6 +588,80 @@ function collectStoredFixtures(reports: any[]) {
 
 function fixtureKey(sport: string, fixtureId: number) {
   return `${sport || "football"}:${fixtureId}`;
+}
+
+function localDateForSelection(selection: PickLike, fallbackDate: string) {
+  const startsAt = String(selection.startsAt || "");
+  if (!startsAt) return fallbackDate;
+
+  const parsed = new Date(startsAt);
+  if (!Number.isFinite(parsed.getTime())) return fallbackDate;
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: DEFAULT_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(parsed);
+}
+
+async function loadUpdatedFixtures(
+  selections: PickLike[],
+  storedFixturesById: Map<string, ApiFootballFixture>,
+  fallbackDate: string
+) {
+  const queries = new Map<string, { sport: string; date: string }>();
+
+  for (const selection of selections) {
+    const fixtureId = selectionFixtureId(selection);
+    const sport = selectionSport(selection);
+    if (!fixtureId || !["football", "basketball", "volleyball"].includes(sport)) continue;
+    const stored = storedFixturesById.get(fixtureKey(sport, fixtureId));
+    if (stored && isFinished(stored)) continue;
+    const date = localDateForSelection(selection, fallbackDate);
+    queries.set(`${sport}:${date}`, { sport, date });
+  }
+
+  const requestCounts: Record<string, number> = {
+    football: 0,
+    basketball: 0,
+    volleyball: 0,
+  };
+  const queryResults = await Promise.all([...queries.values()].map(async ({ sport, date }) => {
+    requestCounts[sport] = (requestCounts[sport] || 0) + 1;
+    try {
+      const fixtures = sport === "football"
+        ? await apiFootball("/fixtures", { date, timezone: DEFAULT_TIMEZONE })
+        : await apiSportGames(sport as ResultApiSport, { date, timezone: DEFAULT_TIMEZONE });
+      return { sport, date, fixtures, error: "" };
+    } catch (error: any) {
+      return {
+        sport,
+        date,
+        fixtures: [],
+        error: error?.message || `Nao consegui atualizar ${sport}.`,
+      };
+    }
+  }));
+
+  const fixturesById = new Map<string, ApiFootballFixture>();
+  const warnings: string[] = [];
+  for (const result of queryResults) {
+    if (result.error) {
+      warnings.push(`${result.sport} ${result.date}: ${result.error}`);
+      continue;
+    }
+    for (const fixture of result.fixtures || []) {
+      const fixtureId = fixtureIdFromFixture(fixture);
+      if (fixtureId) fixturesById.set(fixtureKey(result.sport, fixtureId), fixture);
+    }
+  }
+
+  return {
+    fixturesById,
+    warnings,
+    requestCounts,
+    fixtureRequests: Object.values(requestCounts).reduce((sum, value) => sum + value, 0),
+  };
 }
 
 function goalValue(fixture: ApiFootballFixture, side: "home" | "away") {
@@ -774,31 +924,33 @@ function statusTone(status: PickStatus) {
   return "extremo";
 }
 
-export default async (req: Request) => {
+export default async (req: Request, context: { deploy?: { published?: boolean } }) => {
   const url = new URL(req.url);
   const date = await resolveReportDate(url.searchParams.get("date"));
   const allowLiveApi = url.searchParams.get("refresh") === "1" || url.searchParams.get("live") === "1";
 
-  if (allowLiveApi && !getEnv("API_FOOTBALL_KEY")) {
-    return json({
-      error: "API_FOOTBALL_KEY ausente",
-      setup: [
-        "Configure API_FOOTBALL_KEY no Netlify.",
-        "O relatorio de acertos precisa consultar placares/resultados na API-Football.",
-      ],
-    }, { status: 501 });
-  }
-
   try {
-    if (!allowLiveApi) {
-      const cachedSettlement = await readCachedSettlement(date);
-      if (cachedSettlement) {
+    const cachedSettlement = await readCachedSettlement(date);
+    if (cachedSettlement) {
+      const cachedItems = Array.isArray(cachedSettlement.items) ? cachedSettlement.items : [];
+      const unresolved = cachedItems.filter((item: any) => ["pending", "review"].includes(String(item?.status || "")));
+      const hasUnresolved = unresolved.length > 0;
+      const allUnresolvedAreFuture = hasUnresolved && unresolved.every(isFuturePendingItem);
+      if (!allowLiveApi || !hasUnresolved || allUnresolvedAreFuture) {
         return json({
           ...cachedSettlement,
           source: {
             ...cachedSettlement.source,
             cached: true,
-            mode: "Fechamento salvo sem chamadas externas",
+            fixtureRequests: 0,
+            fixtureRequestsBySport: { football: 0, basketball: 0, volleyball: 0 },
+            liveFixtureHits: 0,
+            fallbackFixtureHits: 0,
+            mode: !hasUnresolved
+              ? "Fechamento completo salvo"
+              : allUnresolvedAreFuture
+                ? "Fechamento parcial salvo; jogos ainda agendados"
+                : "Fechamento salvo sem chamadas externas",
           },
         });
       }
@@ -822,27 +974,38 @@ export default async (req: Request) => {
     const selectionKeys = [...new Set(selections
       .map((selection) => fixtureKey(selectionSport(selection), selectionFixtureId(selection)))
       .filter((key) => !key.endsWith(":0")))];
-    let fixtureRequests = 0;
+
+    const updated = allowLiveApi
+      ? await loadUpdatedFixtures(selections, storedFixturesById, date)
+      : {
+          fixturesById: new Map<string, ApiFootballFixture>(),
+          warnings: [] as string[],
+          requestCounts: { football: 0, basketball: 0, volleyball: 0 },
+          fixtureRequests: 0,
+        };
+
     let cachedFixtureHits = 0;
-    const fixturePairs = await Promise.all(selectionKeys.map(async (key) => {
-      const [sport, rawFixtureId] = key.split(":");
-      const fixtureId = Number(rawFixtureId || 0);
+    let liveFixtureHits = 0;
+    let fallbackFixtureHits = 0;
+    const fixtureSourceByKey = new Map<string, "live" | "stored" | "missing">();
+    const fixturePairs = selectionKeys.map((key) => {
+      const updatedFixture = updated.fixturesById.get(key);
       const storedFixture = storedFixturesById.get(key);
+
+      if (updatedFixture) {
+        liveFixtureHits += 1;
+        fixtureSourceByKey.set(key, "live");
+        return [key, updatedFixture] as const;
+      }
       if (storedFixture) {
         cachedFixtureHits += 1;
+        if (allowLiveApi) fallbackFixtureHits += 1;
+        fixtureSourceByKey.set(key, "stored");
         return [key, storedFixture] as const;
       }
-      if (!allowLiveApi) return [key, null] as const;
-
-      try {
-        fixtureRequests += 1;
-        if (sport !== "football") return [key, null] as const;
-        const fixtures = await apiFootball("/fixtures", { id: fixtureId, timezone: DEFAULT_TIMEZONE });
-        return [key, fixtures[0] || null] as const;
-      } catch {
-        return [key, null] as const;
-      }
-    }));
+      fixtureSourceByKey.set(key, "missing");
+      return [key, null] as const;
+    });
     const fixturesById = new Map<string, ApiFootballFixture | null>(fixturePairs);
     const statsCache = new Map<number, any[]>();
     const items = [];
@@ -850,7 +1013,9 @@ export default async (req: Request) => {
     for (const selection of selections) {
       const fixtureId = selectionFixtureId(selection);
       const sport = selectionSport(selection);
-      const fixture = fixturesById.get(fixtureKey(sport, fixtureId));
+      const key = fixtureKey(sport, fixtureId);
+      const fixture = fixturesById.get(key);
+      const fixtureSource = fixtureSourceByKey.get(key) || "missing";
       if (!fixture) {
         items.push({
           ...selection,
@@ -859,7 +1024,7 @@ export default async (req: Request) => {
           label: statusLabel("review"),
           tone: statusTone("review"),
           reason: allowLiveApi
-            ? "Nao consegui localizar o fixture na API para fechar esse palpite."
+            ? "A API de resultados nao devolveu esse jogo na atualizacao. Deixei para conferir em vez de marcar errado."
             : "Nao encontrei placar final salvo para esse jogo. Nao chamei a API para economizar quota.",
           result: "--",
           category: categoryFor(selection),
@@ -867,7 +1032,13 @@ export default async (req: Request) => {
         continue;
       }
 
-      const result = await evaluateSelection(selection, fixture, statsCache, allowLiveApi);
+      const evaluated = await evaluateSelection(selection, fixture, statsCache, allowLiveApi);
+      const result = evaluated.status === "pending" && allowLiveApi && fixtureSource === "stored"
+        ? {
+            status: "pending" as PickStatus,
+            reason: `Nao consegui atualizar este placar agora. Ultimo status salvo: ${fixtureStatusLong(fixture) || fixtureStatusShort(fixture) || "sem status"}.`,
+          }
+        : evaluated;
       items.push({
         fixtureId,
         sport,
@@ -896,31 +1067,37 @@ export default async (req: Request) => {
 
     const responseBody = {
       source: {
-        provider: allowLiveApi ? "Sete PRO + API-Football resultados" : "Sete PRO + dados salvos",
+        provider: allowLiveApi ? "Sete PRO + APIs oficiais de resultados" : "Sete PRO + dados salvos",
         date,
         generatedAt: new Date().toISOString(),
         timezone: DEFAULT_TIMEZONE,
         reportsFound: reports.length,
         picksChecked: items.length,
-        fixtureRequests,
+        fixtureRequests: updated.fixtureRequests,
+        fixtureRequestsBySport: updated.requestCounts,
+        liveFixtureHits,
         cachedFixtureHits,
+        fallbackFixtureHits,
         statisticsRequests: statsCache.size,
-        mode: allowLiveApi ? "Atualizacao com API" : "Economico sem chamadas externas",
+        warnings: updated.warnings,
+        mode: allowLiveApi ? "Atualizacao agrupada com APIs" : "Economico sem chamadas externas",
       },
       summary,
       items,
     };
     await saveSettlement(responseBody);
-    await notifySettlementIfNeeded(responseBody);
+    if (context?.deploy?.published === true) {
+      await notifySettlementIfNeeded(responseBody);
+    }
     return json(responseBody);
   } catch (error: any) {
     const friendly = friendlyErrorPayload(error, "Nao consegui gerar o relatorio de acertos");
     return json({
       ...friendly.body,
       setup: [
-        "No modo economico, gere/salve palpites apos os jogos para o relatorio usar placares ja salvos.",
-        "Se precisar atualizar placares ao vivo, use refresh=1 no endpoint e confira a quota da API_FOOTBALL_KEY.",
         "Confira se ja existe palpite salvo para o dia escolhido.",
+        "Confirme a quota das APIs de futebol, basquete e volei.",
+        "Tente novamente em alguns minutos se algum provedor ainda nao publicou o placar final.",
       ],
     }, { status: friendly.status === 500 ? 502 : friendly.status });
   }
