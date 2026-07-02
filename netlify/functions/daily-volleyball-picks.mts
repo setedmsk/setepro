@@ -715,7 +715,9 @@ async function saveReport(report: SportReport) {
 
   try {
     const store = reportStore();
+    const snapshot = String(Date.parse(report.source.generatedAt) || Date.now());
     await store.setJSON(`reports/${REPORT_CACHE_VERSION}/${report.source.date}.json`, report);
+    await store.setJSON(`history/${report.source.date}/${snapshot}.json`, report);
     await store.setJSON("latest.json", report);
   } catch {
     // The response remains useful when blob storage is unavailable locally.

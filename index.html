@@ -1060,8 +1060,12 @@
       color: #ffe2a8;
     }
 
-    .analysis-table tr.settlement-won-row td {
+    .analysis-table tr.settlement-won-row {
       background: linear-gradient(90deg, rgba(4, 45, 38, 0.82), rgba(49, 247, 164, 0.055));
+    }
+
+    .analysis-table tr.settlement-won-row td {
+      background: transparent;
       border-bottom-color: rgba(49, 247, 164, 0.18);
     }
 
@@ -1069,8 +1073,12 @@
       box-shadow: inset 3px 0 0 rgba(49, 247, 164, 0.58);
     }
 
-    .analysis-table tr.settlement-lost-row td {
+    .analysis-table tr.settlement-lost-row {
       background: linear-gradient(90deg, rgba(58, 13, 28, 0.82), rgba(255, 99, 114, 0.055));
+    }
+
+    .analysis-table tr.settlement-lost-row td {
+      background: transparent;
       border-bottom-color: rgba(255, 99, 114, 0.18);
     }
 
@@ -1078,9 +1086,22 @@
       box-shadow: inset 3px 0 0 rgba(255, 99, 114, 0.58);
     }
 
+    .analysis-table tr.settlement-review-row,
+    .analysis-table tr.settlement-void-row {
+      background: linear-gradient(90deg, rgba(55, 36, 10, 0.62), rgba(255, 190, 73, 0.04));
+    }
+
     .analysis-table tr.settlement-review-row td,
     .analysis-table tr.settlement-void-row td {
-      background: linear-gradient(90deg, rgba(55, 36, 10, 0.62), rgba(255, 190, 73, 0.04));
+      background: transparent;
+    }
+
+    .analysis-table tr.settlement-pending-row {
+      background: linear-gradient(90deg, rgba(7, 42, 58, 0.72), rgba(37, 217, 255, 0.04));
+    }
+
+    .analysis-table tr.settlement-pending-row td {
+      background: transparent;
     }
 
     .analysis-table {
@@ -1107,6 +1128,14 @@
 
     .analysis-table tr:nth-child(even) td {
       background: rgba(168, 85, 247, 0.035);
+    }
+
+    .analysis-table tr.settlement-won-row td,
+    .analysis-table tr.settlement-lost-row td,
+    .analysis-table tr.settlement-pending-row td,
+    .analysis-table tr.settlement-review-row td,
+    .analysis-table tr.settlement-void-row td {
+      background: transparent;
     }
 
     .analysis-table th {
@@ -3881,7 +3910,7 @@
 
     function renderUpcomingSettlements(items) {
       if (!Array.isArray(items) || !items.length) return "";
-      const rows = items.slice(0, 12).map((item) => {
+      const rows = items.map((item) => {
         const market = item.market || item.category || "--";
         const selection = item.selection || item.pick || item.value || "--";
         return [

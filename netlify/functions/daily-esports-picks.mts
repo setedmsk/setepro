@@ -419,7 +419,9 @@ async function saveReport(report: EsportsReport) {
 
   try {
     const store = reportStore();
+    const snapshot = String(Date.parse(report.source.generatedAt) || Date.now());
     await store.setJSON(`reports/${report.source.date}.json`, report);
+    await store.setJSON(`history/${report.source.date}/${snapshot}.json`, report);
     await store.setJSON("latest.json", report);
   } catch {
     // O retorno continua util mesmo se o cache local/Blobs falhar.

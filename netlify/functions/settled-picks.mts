@@ -1,6 +1,11 @@
 import { getStore } from "@netlify/blobs";
 import { sendPushToAll } from "./_shared/push.mts";
 import { externalServiceError, fetchWithTimeout, friendlyErrorPayload, missingConfig } from "./_shared/http.mts";
+import {
+  arrayFromResponse,
+  oddsApiIoFetch,
+  oddsApiIoKey,
+} from "./_shared/odds-api-io.mts";
 
 declare const Netlify: {
   env: {
@@ -195,6 +200,10 @@ function volleyballStore() {
   return getStore({ name: "daily-volleyball-picks", consistency: "strong" });
 }
 
+function esportsStore() {
+  return getStore({ name: "daily-esports-picks", consistency: "strong" });
+}
+
 function settlementStore() {
   return getStore({ name: "settled-picks", consistency: "strong" });
 }
@@ -347,21 +356,42 @@ async function readFootballReportsForDate(date: string) {
 
 async function readSingleReportForDate(store: ReturnType<typeof getStore>, date: string, key: string, sport: string) {
   const reports: any[] = [];
+  const seen = new Set<string>();
 
   try {
     const report = await store.get(key, { type: "json" }) as any;
     if (report?.source?.date === date && Array.isArray(report?.raw?.picks)) {
       reports.push(withSettlementSport(report, sport));
+      seen.add(String(report?.source?.generatedAt || report?.source?.provider || key));
     }
   } catch {
     // No cached report for this sport/date.
   }
 
   try {
+    const listed = await store.list({ prefix: `history/${date}/` });
+    for (const blob of listed.blobs || []) {
+      if (!blob.key) continue;
+      const report = await store.get(blob.key, { type: "json" }) as any;
+      const reportKey = String(report?.source?.generatedAt || report?.source?.provider || blob.key);
+      if (
+        report?.source?.date === date &&
+        Array.isArray(report?.raw?.picks) &&
+        !seen.has(reportKey)
+      ) {
+        reports.push(withSettlementSport(report, sport));
+        seen.add(reportKey);
+      }
+    }
+  } catch {
+    // Snapshot history is optional for reports saved before this version.
+  }
+
+  try {
     const latest = await store.get("latest.json", { type: "json" }) as any;
     if (latest?.source?.date === date && Array.isArray(latest?.raw?.picks)) {
-      const alreadyAdded = reports.some((report) => String(report?.source?.provider || "") === String(latest?.source?.provider || ""));
-      if (!alreadyAdded) reports.push(withSettlementSport(latest, sport));
+      const reportKey = String(latest?.source?.generatedAt || latest?.source?.provider || "latest");
+      if (!seen.has(reportKey)) reports.push(withSettlementSport(latest, sport));
     }
   } catch {
     // No latest report for this sport.
@@ -371,13 +401,14 @@ async function readSingleReportForDate(store: ReturnType<typeof getStore>, date:
 }
 
 async function readReportsForDate(date: string) {
-  const [football, basketball, volleyball] = await Promise.all([
+  const [football, basketball, volleyball, esports] = await Promise.all([
     readFootballReportsForDate(date),
     readSingleReportForDate(basketballStore(), date, `reports/${date}.json`, "basketball"),
     readSingleReportForDate(volleyballStore(), date, `reports/${VOLLEYBALL_CACHE_VERSION}/${date}.json`, "volleyball"),
+    readSingleReportForDate(esportsStore(), date, `reports/${date}.json`, "esports"),
   ]);
 
-  return [...football, ...basketball, ...volleyball];
+  return [...football, ...basketball, ...volleyball, ...esports];
 }
 
 async function listReportDates() {
@@ -406,6 +437,7 @@ async function listReportDates() {
   for (const [extraStore, prefix] of [
     [basketballStore(), "reports/"],
     [volleyballStore(), `reports/${VOLLEYBALL_CACHE_VERSION}/`],
+    [esportsStore(), "reports/"],
   ] as const) {
     try {
       const listed = await extraStore.list({ prefix });
@@ -471,6 +503,15 @@ function selectionSport(selection: PickLike) {
   const normalized = normalizeText(String(selection.sport || ""));
   if (normalized.includes("basket")) return "basketball";
   if (normalized.includes("volley") || normalized.includes("volei")) return "volleyball";
+  if (
+    normalized.includes("esport") ||
+    normalized.includes("counter") ||
+    normalized.includes("cs2") ||
+    normalized.includes("csgo") ||
+    normalized.includes("valorant") ||
+    normalized.includes("dota") ||
+    normalized.includes("league of legends")
+  ) return "esports";
   if (normalized.includes("foot") || normalized.includes("futebol") || normalized.includes("soccer")) return "football";
   return "football";
 }
@@ -542,7 +583,7 @@ function collectReportSelections(report: any) {
         sport: selection.sport || raw?.sport || sport || "football",
         reportDate: String(report?.source?.date || ""),
         ticketName: item.name,
-        sourceLabel: report?.source?.scopeLabel || (sport === "basketball" ? "Basquete" : sport === "volleyball" ? "Volei" : "Palpites do dia"),
+        sourceLabel: report?.source?.scopeLabel || (sport === "basketball" ? "Basquete" : sport === "volleyball" ? "Volei" : sport === "esports" ? "E-sports" : "Palpites do dia"),
       });
     }
   }
@@ -554,7 +595,7 @@ function collectReportSelections(report: any) {
         sport: pick.sport || sport || "football",
         reportDate: String(report?.source?.date || ""),
         ticketName: "Palpite",
-        sourceLabel: report?.source?.scopeLabel || (sport === "basketball" ? "Basquete" : sport === "volleyball" ? "Volei" : "Palpites do dia"),
+        sourceLabel: report?.source?.scopeLabel || (sport === "basketball" ? "Basquete" : sport === "volleyball" ? "Volei" : sport === "esports" ? "E-sports" : "Palpites do dia"),
       });
     }
   }
@@ -635,6 +676,42 @@ function localDateForSelection(selection: PickLike, fallbackDate: string) {
   }).format(parsed);
 }
 
+function normalizeEsportsFixture(event: any): ApiFootballFixture {
+  const home = String(event?.home || event?.teams?.home?.name || "Time 1");
+  const away = String(event?.away || event?.teams?.away?.name || "Time 2");
+  return {
+    ...event,
+    fixture: {
+      id: Number(event?.id || event?.eventId || event?.fixtureId || 0),
+      date: String(event?.date || event?.startTime || event?.startsAt || ""),
+      status: {
+        short: String(event?.status || event?.statusName || ""),
+        long: String(event?.status || event?.statusName || ""),
+      },
+    },
+    teams: {
+      home: { id: Number(event?.homeId || 0), name: home },
+      away: { id: Number(event?.awayId || 0), name: away },
+    },
+    scores: event?.scores || {},
+  } as ApiFootballFixture;
+}
+
+async function apiEsportsGames(date: string) {
+  const key = oddsApiIoKey(["ESPORTS_ODDS_API_KEY"]);
+  if (!key) throw missingConfig("ODDS_API_IO_KEY", "Odds-API.io");
+  const from = new Date(`${date}T00:00:00-03:00`).toISOString();
+  const to = new Date(`${date}T23:59:59-03:00`).toISOString();
+  const data = await oddsApiIoFetch("/events", {
+    sport: "esports",
+    status: "live,settled",
+    from,
+    to,
+    limit: 100,
+  }, key, "Odds-API.io E-sports");
+  return arrayFromResponse(data).map(normalizeEsportsFixture);
+}
+
 async function loadUpdatedFixtures(
   selections: PickLike[],
   storedFixturesById: Map<string, ApiFootballFixture>,
@@ -645,7 +722,7 @@ async function loadUpdatedFixtures(
   for (const selection of selections) {
     const fixtureId = selectionFixtureId(selection);
     const sport = selectionSport(selection);
-    if (!fixtureId || !["football", "basketball", "volleyball"].includes(sport)) continue;
+    if (!fixtureId || !["football", "basketball", "volleyball", "esports"].includes(sport)) continue;
     const stored = storedFixturesById.get(fixtureKey(sport, fixtureId));
     if (stored && isFinished(stored)) continue;
     const date = localDateForSelection(selection, fallbackDate);
@@ -656,13 +733,16 @@ async function loadUpdatedFixtures(
     football: 0,
     basketball: 0,
     volleyball: 0,
+    esports: 0,
   };
   const queryResults = await Promise.all([...queries.values()].map(async ({ sport, date }) => {
     requestCounts[sport] = (requestCounts[sport] || 0) + 1;
     try {
       const fixtures = sport === "football"
         ? await apiFootball("/fixtures", { date, timezone: DEFAULT_TIMEZONE })
-        : await apiSportGames(sport as ResultApiSport, { date, timezone: DEFAULT_TIMEZONE });
+        : sport === "esports"
+          ? await apiEsportsGames(date)
+          : await apiSportGames(sport as ResultApiSport, { date, timezone: DEFAULT_TIMEZONE });
       return { sport, date, fixtures, error: "" };
     } catch (error: any) {
       return {
@@ -724,6 +804,7 @@ function isFinished(fixture: ApiFootballFixture) {
     ["ft", "aet", "pen", "aot", "ap"].some((item) => status.split(" ").includes(item)) ||
     status.includes("match finished") ||
     status.includes("finished") ||
+    status.includes("settled") ||
     status.includes("after overtime") ||
     status.includes("ended")
   );
@@ -1045,6 +1126,18 @@ async function handleWeeklySettlement(
   const startedSelections = collected.filter((selection) => selectionHasStarted(selection));
   const upcomingSelections = collected.filter((selection) => !selectionHasStarted(selection));
   const cached = await readWeeklySettlement(dateTo);
+  if (!allowLiveApi && cached) {
+    return json({
+      ...cached,
+      source: {
+        ...cached.source,
+        cached: true,
+        fixtureRequests: 0,
+        fixtureRequestsBySport: { football: 0, basketball: 0, volleyball: 0, esports: 0 },
+        mode: "Historico semanal salvo",
+      },
+    });
+  }
   const currentStartedKeys = new Set(startedSelections.map(weeklySelectionSignature));
   const cachedReusable = Array.isArray(cached?.items)
     ? cached.items.flatMap((item: any) => {
@@ -1074,7 +1167,7 @@ async function handleWeeklySettlement(
         fixturesById: new Map<string, ApiFootballFixture>(),
         warnings: [] as string[],
         failedQueryKeys: new Set<string>(),
-        requestCounts: { football: 0, basketball: 0, volleyball: 0 },
+        requestCounts: { football: 0, basketball: 0, volleyball: 0, esports: 0 },
         fixtureRequests: 0,
       };
 
@@ -1228,7 +1321,7 @@ export default async (req: Request, context: { deploy?: { published?: boolean } 
             ...cachedSettlement.source,
             cached: true,
             fixtureRequests: 0,
-            fixtureRequestsBySport: { football: 0, basketball: 0, volleyball: 0 },
+            fixtureRequestsBySport: { football: 0, basketball: 0, volleyball: 0, esports: 0 },
             liveFixtureHits: 0,
             fallbackFixtureHits: 0,
             mode: !hasUnresolved
@@ -1266,7 +1359,7 @@ export default async (req: Request, context: { deploy?: { published?: boolean } 
           fixturesById: new Map<string, ApiFootballFixture>(),
           warnings: [] as string[],
           failedQueryKeys: new Set<string>(),
-          requestCounts: { football: 0, basketball: 0, volleyball: 0 },
+          requestCounts: { football: 0, basketball: 0, volleyball: 0, esports: 0 },
           fixtureRequests: 0,
         };
 
