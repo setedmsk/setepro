@@ -810,6 +810,15 @@
       gap: 8px;
     }
 
+    .selection-origin {
+      display: block;
+      margin-top: 3px;
+      color: #9f8dbf;
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1.25;
+    }
+
     .ticket-actions {
       display: grid;
       grid-template-columns: 1fr;
@@ -2496,9 +2505,10 @@
     function renderTicketCard(title, tone, picks, context, description) {
       const ticketOdd = product(picks.map((pick) => pick.odd).filter(Boolean));
       const returnValue = context.stake * ticketOdd;
+      const profileLabel = ticketProfileLabel(title);
       const rows = picks.length ? picks.map((pick) => {
         const odd = pick.odd ? formatOdd(pick.odd) : "--";
-        return "<tr><td>" + escapeHtml(pick.game) + "</td><td>" + escapeHtml(formatMarketName(pick.market)) + "</td><td>" + odd + "</td></tr>";
+        return "<tr><td>" + renderGameCellWithOrigin(pick, profileLabel) + "</td><td>" + escapeHtml(formatMarketName(pick.market)) + "</td><td>" + odd + "</td></tr>";
       }).join("") : "<tr><td colspan=\"3\">Nenhuma sele\u00e7\u00e3o compat\u00edvel com este perfil.</td></tr>";
 
       return [
@@ -2639,7 +2649,7 @@
       if (text.includes("futebol") || text.includes("football") || text.includes("soccer") || text.includes("api football")) {
         return { icon: "⚽", label: "Futebol", className: "football" };
       }
-      if (text.includes("e sports") || text.includes("esports") || text.includes("odds api io") || text.includes("counter strike") || text.includes("valorant") || text.includes("dota") || text.includes("league of legends")) {
+      if (text.includes("e sports") || text.includes("esports") || text.includes("odds api io") || text.includes("counter strike") || text.includes("cs2") || text.includes("csgo") || text.includes("valorant") || text.includes("dota") || text.includes("league of legends")) {
         return { icon: "🎮", label: "E-sports", className: "esports" };
       }
       return { icon: "⚽", label: "Futebol", className: "football" };
@@ -2658,6 +2668,26 @@
         startTime ? "<span class=\"sport-game-time\">" + escapeHtml(startTime) + "</span>" : "",
         "</span>",
         "</span>"
+      ].join("");
+    }
+
+    function ticketProfileLabel(title) {
+      const normalized = normalizeTextForDisplay(title || "");
+      if (normalized.includes("conservador")) return "Conservador";
+      if (normalized.includes("equilibrado")) return "Equilibrado";
+      if (normalized.includes("moderado")) return "Moderado";
+      if (normalized.includes("ousado")) return "Ousado";
+      if (normalized.includes("agressivo") || normalized.includes("odd alta")) return "Odd alta";
+      if (normalized.includes("principal") || normalized.includes("recomendacao")) return "Principal";
+      return "Palpite";
+    }
+
+    function renderGameCellWithOrigin(selection, profileLabel) {
+      const repaired = repairRemoteSelection(selection || {});
+      const sport = selectionSportMeta(repaired);
+      return [
+        renderGameCell(repaired),
+        "<span class=\"selection-origin\">" + escapeHtml(sport.label + " | " + (profileLabel || "Palpite")) + "</span>"
       ].join("");
     }
 
@@ -2946,12 +2976,13 @@
 
     function renderHistoryTicket(ticket) {
       const status = computeHistoryTicketStatus(ticket);
+      const profileLabel = ticketProfileLabel(ticket.title);
       const rows = (ticket.selections || []).slice(0, 7).map((selection) => {
         const market = formatMarketName(selection.market || selection.category || "Mercado");
         const pick = formatSelectionName(selection.selection || "--", selection.market || selection.category || "");
         const odd = selection.odd ? formatOdd(Number(selection.odd)) : "--";
         const statusLabel = historyStatusLabel(selection.status || "pending");
-        return "<tr><td>" + renderGameCell(selection) + "</td><td>" + escapeHtml(market + " - " + pick) + "</td><td>" + escapeHtml(odd) + "</td><td>" + escapeHtml(statusLabel) + "</td></tr>";
+        return "<tr><td>" + renderGameCellWithOrigin(selection, profileLabel) + "</td><td>" + escapeHtml(market + " - " + pick) + "</td><td>" + escapeHtml(odd) + "</td><td>" + escapeHtml(statusLabel) + "</td></tr>";
       }).join("");
       const text = ticketCopyTextFromHistory(ticket);
       const actionId = registerTicketAction({ text, ticket });
@@ -3191,7 +3222,7 @@
       if (!copied) throw new Error("Nao foi possivel copiar o bilhete.");
     }
 
-    function renderRemoteSelection(selection) {
+    function renderRemoteSelection(selection, profileLabel) {
       const repaired = repairRemoteSelection(selection);
       const rawMarket = repaired.market || repaired.category || "Mercado";
       const market = formatMarketName(rawMarket);
@@ -3200,7 +3231,7 @@
       const probability = formatProbability(repaired.impliedProbability);
       const bookmaker = bookmakerLabel(repaired);
       const source = bookmaker ? " | " + bookmaker : "";
-      return "<tr><td>" + renderGameCell(repaired) + "</td><td>" + escapeHtml(market + " - " + pick + source) + "</td><td>" + escapeHtml(odd + " / " + probability) + "</td></tr>";
+      return "<tr><td>" + renderGameCellWithOrigin(repaired, profileLabel) + "</td><td>" + escapeHtml(market + " - " + pick + source) + "</td><td>" + escapeHtml(odd + " / " + probability) + "</td></tr>";
     }
 
     function formatGameName(selection) {
@@ -3392,8 +3423,9 @@
       if (!ticket) return "";
 
       const selections = getRemoteTicketSelections(ticket);
+      const profileLabel = ticketProfileLabel(title);
       const rows = selections.length
-        ? selections.map(renderRemoteSelection).join("")
+        ? selections.map((selection) => renderRemoteSelection(selection, profileLabel)).join("")
         : "<tr><td colspan=\"3\">Nenhuma sele\u00e7\u00e3o retornada para este perfil.</td></tr>";
       const totalOdd = getRemoteTicketOdd(ticket, selections);
       const rawReturn = ticket && !Array.isArray(ticket) ? ticket.possibleReturn || ticket.returnValue : null;
@@ -3757,7 +3789,7 @@
         const odd = repaired.odd ? formatOdd(Number(repaired.odd)) : "--";
         const bookmaker = bookmakerLabel(repaired);
         const source = bookmaker ? " | " + bookmaker : "";
-        return "<tr><td>" + renderGameCell(repaired) + "</td><td>" + escapeHtml(market + " - " + pick + source) + "</td><td>" + escapeHtml(odd) + "</td></tr>";
+        return "<tr><td>" + renderGameCellWithOrigin(repaired, "Principal") + "</td><td>" + escapeHtml(market + " - " + pick + source) + "</td><td>" + escapeHtml(odd) + "</td></tr>";
       }).join("");
 
       return [
